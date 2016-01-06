@@ -278,24 +278,24 @@ DIB vc_dib = {
 #define DBG_INT         0x00FF                          /* interrupt 0-7 */
 
 DEBTAB vc_debug[] = {
-    {"REG",     DBG_REG},
-    {"CRTC",    DBG_CRTC},
-    {"CURSOR",  DBG_CURSOR},
-    {"TCURSOR", DBG_TCURSOR},
-    {"SCANL",   DBG_SCANL},
-    {"DUART",   DBG_INT0},
-    {"VSYNC",   DBG_INT1},
-    {"MOUSE",   DBG_INT2},
-    {"CSTRT",   DBG_INT3},
-    {"MBA",     DBG_INT4},
-    {"MBB",     DBG_INT5},
-    {"MBC",     DBG_INT6},
-    {"SPARE",   DBG_INT7},
-    {"INT",     DBG_INT0|DBG_INT1|DBG_INT2|DBG_INT3|DBG_INT4|DBG_INT5|DBG_INT6|DBG_INT7},
-    {"VMOUSE",  SIM_VID_DBG_MOUSE},
-    {"VCURSOR", SIM_VID_DBG_CURSOR},
-    {"VKEY",    SIM_VID_DBG_KEY},
-    {"VVIDEO",  SIM_VID_DBG_VIDEO},
+    {"REG",     DBG_REG,                "Register activity"},
+    {"CRTC",    DBG_CRTC,               "CRTC register activity"},
+    {"CURSOR",  DBG_CURSOR,             "Cursor content, function and visibility activity"},
+    {"TCURSOR", DBG_TCURSOR,            "Cursor content, function and visibility activity"},
+    {"SCANL",   DBG_SCANL,              "Scanline map activity"},
+    {"DUART",   DBG_INT0,               "interrupt 0"},
+    {"VSYNC",   DBG_INT1,               "interrupt 1"},
+    {"MOUSE",   DBG_INT2,               "interrupt 2"},
+    {"CSTRT",   DBG_INT3,               "interrupt 3"},
+    {"MBA",     DBG_INT4,               "interrupt 4"},
+    {"MBB",     DBG_INT5,               "interrupt 5"},
+    {"MBC",     DBG_INT6,               "interrupt 6"},
+    {"SPARE",   DBG_INT7,               "interrupt 7"},
+    {"INT",     DBG_INT0|DBG_INT1|DBG_INT2|DBG_INT3|DBG_INT4|DBG_INT5|DBG_INT6|DBG_INT7, "interrupt 0-7"},
+    {"VMOUSE",  SIM_VID_DBG_MOUSE,      "Video Mouse"},
+    {"VCURSOR", SIM_VID_DBG_CURSOR,     "Video Cursor"},
+    {"VKEY",    SIM_VID_DBG_KEY,        "Video Key"},
+    {"VVIDEO",  SIM_VID_DBG_VIDEO,      "Video Video"},
     {0}
     };
 
@@ -350,7 +350,7 @@ DEVICE vc_dev = {
     };
 
 UART2681 vc_uart = {
-    &vc_uart_int,
+    &vc_uart_int, NULL,
     { { &lk_wr, &lk_rd }, { &vs_wr, &vs_rd } }
     };
 
@@ -566,7 +566,15 @@ switch (rg) {
         else if (vc_intc.ptr == 9)                      /* ACR */
             vc_intc.acr = data & 0xFFFF;
         else  
-            vc_intc.vec[vc_intc.ptr] = data & 0xFFFF;   /* Vector */
+            /* 
+               Masking the vector with 0x1FC is probably storing 
+               one more bit than the original hardware did.  
+               Doing this allows a maximal simulated hardware 
+               configuration use a reasonable vector where real 
+               hardware could never be assembled with that many 
+               devices.
+             */
+            vc_intc.vec[vc_intc.ptr] = data & 0x1FC;    /* Vector */ 
         break;
 
     case 7:                                             /* ICSR */
@@ -860,7 +868,7 @@ for (i = 0; i < 8; i++) {
             vc_intc.isr &= ~(1u << i);
         else vc_intc.isr |= (1u << i);
         vc_checkint();
-        result = (vc_intc.vec[i] + VEC_Q);
+        result = vc_intc.vec[i];
         sim_debug (DBG_INT, &vc_dev, "Int Ack Vector: 0%03o (0x%X)\n", result, result);
         return result;
         }

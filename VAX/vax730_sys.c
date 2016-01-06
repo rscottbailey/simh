@@ -63,7 +63,6 @@ static struct boot_dev boot_tab[] = {
     { "RQB", BOOT_UDA, 1 << 24 },
     { "RQC", BOOT_UDA, 1 << 24 },
     { "RQD", BOOT_UDA, 1 << 24 },
-    { "TQ", BOOT_TK, 1 << 24 },
     { "TD", BOOT_TD, 0 },
     { "RB", BOOT_RB, 0 },
     { NULL }
@@ -547,7 +546,7 @@ for (i = 0; boot_tab[i].name != NULL; i++) {
         R[0] = boot_tab[i].code;
         if (boot_tab[i].code == BOOT_RB) {              /* vector set by console for RB730 */
             extern DIB rb_dib;
-            R[0] = R[0] | ((rb_dib.vec - VEC_Q) << 16);
+            R[0] = R[0] | ((rb_dib.vec) << 16);
             }
         R[1] = TR_UBA;
         R[2] = boot_tab[i].let | (ba & UBADDRMASK);
@@ -591,7 +590,7 @@ return "system bus controller";
 
 t_stat show_nexus (FILE *st, UNIT *uptr, int32 val, void *desc)
 {
-fprintf (st, "nexus=%d", val);
+fprintf (st, "nexus=%d, address=%X", val, NEXUSBASE + ((1 << REG_V_NEXUS) * val));
 return SCPE_OK;
 }
 

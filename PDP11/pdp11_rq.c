@@ -258,7 +258,7 @@ struct rqpkt {
    RD52 17      8       512     8       1       4*8     60480
    RD32 17      6       820     6       1       4*8     83204
 x  RD33 17      7       1170    ?       ?       ?       138565
-   RD53 17      7       1024    7       1       5*8     138672
+   RD53 17      8       1024    8       1       5*8     138672
    RD54 17      15      1225    15      1       7*8     311200
 
    The simulator also supports larger drives that only existed
@@ -754,7 +754,7 @@ static struct ctlrtyp ctlr_tab[] = {
 
 extern int32 int_req[IPL_HLVL];
 
-int32 rq_itime = 200;                                   /* init time, except */
+int32 rq_itime = 450;                                   /* init time, except */
 int32 rq_itime4 = 10;                                   /* stage 4 */
 int32 rq_qtime = RQ_QTIME;                              /* queue time */
 int32 rq_xtime = RQ_XTIME;                              /* transfer time */
@@ -793,12 +793,12 @@ typedef struct {
 #define DBG_DAT  0x0020                                 /* display transfer data */
 
 DEBTAB rq_debug[] = {
-  {"TRACE",  DBG_TRC},
-  {"INIT",   DBG_INI},
-  {"REG",    DBG_REG},
-  {"REQ",    DBG_REQ},
-  {"DISK",   DBG_DSK},
-  {"DATA",   DBG_DAT},
+  {"TRACE",  DBG_TRC, "trace routine calls"},
+  {"INIT",   DBG_INI, "display setup/init sequence info"},
+  {"REG",    DBG_REG, "trace read/write registers"},
+  {"REQ",    DBG_REQ, "display transfer requests"},
+  {"DISK",   DBG_DSK, "display sim_disk activities"},
+  {"DATA",   DBG_DAT, "display transfer data"},
   {0}
 };
 
@@ -1323,7 +1323,7 @@ int32 cidx = rq_map_pa ((uint32) PA);
 MSC *cp = rq_ctxmap[cidx];
 DEVICE *dptr = rq_devmap[cidx];
 
-sim_debug(DBG_REG, dptr, "rq_rd(PA=0x%08X [%s], access=%d)\n", PA, ((PA >> 1) & 01) ? "IP" : "SA", access);
+sim_debug(DBG_REG, dptr, "rq_rd(PA=0x%08X [%s], access=%d)=0x%04X\n", PA, ((PA >> 1) & 01) ? "SA" : "IP", access, ((PA >> 1) & 01) ? cp->sa : 0);
 
 if (cidx < 0)
     return SCPE_IERR;
@@ -1356,7 +1356,7 @@ DEVICE *dptr = rq_devmap[cidx];
 if (cidx < 0)
     return SCPE_IERR;
 
-sim_debug(DBG_REG, dptr, "rq_wr(PA=0x%08X [%s], access=%d)\n", PA, ((PA >> 1) & 01) ? "IP" : "SA", access);
+sim_debug(DBG_REG, dptr, "rq_wr(PA=0x%08X [%s], access=%d, data=0x%04X)\n", PA, ((PA >> 1) & 01) ? "SA" : "IP", access, data);
 
 switch ((PA >> 1) & 01) {                               /* decode PA<1> */
 
@@ -1465,8 +1465,6 @@ if (cp->csta < CST_UP) {                                /* still init? */
             else {
                 cp->s1dat = cp->saw;                    /* save data */
                 dibp->vec = (cp->s1dat & SA_S1H_VEC) << 2; /* get vector */
-                if (dibp->vec)                          /* if nz, bias */
-                    dibp->vec = dibp->vec + VEC_Q;
                 cp->sa = SA_S2 | SA_S2C_PT | SA_S2C_EC (cp->s1dat);
                 cp->csta = CST_S2;                      /* now in step 2 */
                 rq_init_int (cp);                       /* intr if req */
@@ -2133,7 +2131,7 @@ uint32 bl = GETP32 (pkt, RW_WBLL);                      /* block addr */
 uint32 ma = GETP32 (pkt, RW_WMPL);                      /* block addr */
 
 sim_debug (DBG_TRC, rq_devmap[cp->cnum], "rq_svc(unit=%d, pkt=%d, cmd=%s, lbn=%0X, bc=%0x, phase=%s)\n",
-           uptr-rq_devmap[cp->cnum]->units, pkt, rq_cmdname[cp->pak[pkt].d[CMD_OPC]&0x3f], bl, bc,
+           (int)(uptr-rq_devmap[cp->cnum]->units), pkt, rq_cmdname[cp->pak[pkt].d[CMD_OPC]&0x3f], bl, bc,
            uptr->io_complete ? "bottom" : "top");
 
 if ((cp == NULL) || (pkt == 0))                         /* what??? */

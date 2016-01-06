@@ -97,8 +97,17 @@ t_stat assert_cmd (int32 flag, char *ptr);
 t_stat send_cmd (int32 flag, char *ptr);
 t_stat expect_cmd (int32 flag, char *ptr);
 t_stat help_cmd (int32 flag, char *ptr);
+t_stat screenshot_cmd (int32 flag, char *ptr);
 t_stat spawn_cmd (int32 flag, char *ptr);
 t_stat echo_cmd (int32 flag, char *ptr);
+
+/* Allow compiler to help validate printf style format arguments */
+#if !defined __GNUC__
+#define GCC_FMT_ATTR(n, m)
+#endif
+#if !defined(GCC_FMT_ATTR)
+#define GCC_FMT_ATTR(n, m) __attribute__ ((format (__printf__, n, m)))
+#endif
 
 /* Utility routines */
 
@@ -107,8 +116,10 @@ t_stat sim_activate (UNIT *uptr, int32 interval);
 t_stat _sim_activate (UNIT *uptr, int32 interval);
 t_stat sim_activate_abs (UNIT *uptr, int32 interval);
 t_stat sim_activate_notbefore (UNIT *uptr, int32 rtime);
-t_stat sim_activate_after (UNIT *uptr, int32 usecs_walltime);
-t_stat _sim_activate_after (UNIT *uptr, int32 usecs_walltime);
+t_stat sim_activate_after (UNIT *uptr, uint32 usecs_walltime);
+t_stat _sim_activate_after (UNIT *uptr, uint32 usecs_walltime);
+t_stat sim_activate_after_abs (UNIT *uptr, uint32 usecs_walltime);
+t_stat _sim_activate_after_abs (UNIT *uptr, uint32 usecs_walltime);
 t_stat sim_cancel (UNIT *uptr);
 t_bool sim_is_active (UNIT *uptr);
 int32 sim_activate_time (UNIT *uptr);
@@ -143,7 +154,9 @@ t_stat sim_decode_quoted_string (const char *iptr, uint8 *optr, uint32 *osize);
 char *sim_encode_quoted_string (const uint8 *iptr, uint32 size);
 void fprint_buffer_string (FILE *st, const uint8 *buf, uint32 size);
 t_value strtotv (const char *cptr, const char **endptr, uint32 radix);
-int Fprintf (FILE *f, const char* fmt, ...);
+int Fprintf (FILE *f, const char* fmt, ...) GCC_FMT_ATTR(2, 3);
+t_stat sim_set_memory_load_file (const unsigned char *data, size_t size);
+int Fgetc (FILE *f);
 t_stat fprint_val (FILE *stream, t_value val, uint32 rdx, uint32 wid, uint32 fmt);
 t_stat sim_print_val (t_value val, uint32 radix, uint32 width, uint32 format);
 char *read_line (char *cptr, int32 size, FILE *stream);
@@ -185,9 +198,12 @@ t_stat show_dev_debug (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, char *cpt
 const char *sim_error_text (t_stat stat);
 t_stat sim_string_to_stat (char *cptr, t_stat *cond);
 t_stat sim_cancel_step (void);
-void sim_printf (const char* fmt, ...);
-t_stat sim_messagef (t_stat stat, const char* fmt, ...);
+void sim_printf (const char* fmt, ...) GCC_FMT_ATTR(1, 2);
+void sim_perror (const char* msg);
+t_stat sim_messagef (t_stat stat, const char* fmt, ...) GCC_FMT_ATTR(2, 3);
 void sim_data_trace(DEVICE *dptr, UNIT *uptr, const uint8 *data, const char *position, size_t len, const char *txt, uint32 reason);
+void sim_debug_bits_hdr (uint32 dbits, DEVICE* dptr, const char *header, 
+    BITFIELD* bitdefs, uint32 before, uint32 after, int terminate);
 void sim_debug_bits (uint32 dbits, DEVICE* dptr, BITFIELD* bitdefs,
     uint32 before, uint32 after, int terminate);
 #if defined (__DECC) && defined (__VMS) && (defined (__VAX) || (__DECC_VER < 60590001))
@@ -195,23 +211,23 @@ void sim_debug_bits (uint32 dbits, DEVICE* dptr, BITFIELD* bitdefs,
 #endif
 #ifdef CANT_USE_MACRO_VA_ARGS
 #define _sim_debug sim_debug
-void sim_debug (uint32 dbits, DEVICE* dptr, const char* fmt, ...);
+void sim_debug (uint32 dbits, DEVICE* dptr, const char* fmt, ...) GCC_FMT_ATTR(3, 4);
 #else
-void _sim_debug (uint32 dbits, DEVICE* dptr, const char* fmt, ...);
-#define sim_debug(dbits, dptr, ...) if (sim_deb && dptr && ((dptr)->dctrl & dbits)) _sim_debug (dbits, dptr, __VA_ARGS__); else (void)0
+void _sim_debug (uint32 dbits, DEVICE* dptr, const char* fmt, ...) GCC_FMT_ATTR(3, 4);
+#define sim_debug(dbits, dptr, ...) do { if (sim_deb && dptr && ((dptr)->dctrl & dbits)) _sim_debug (dbits, dptr, __VA_ARGS__);} while (0)
 #endif
 void fprint_stopped_gen (FILE *st, t_stat v, REG *pc, DEVICE *dptr);
 #define SCP_HELP_FLAT   (1u << 31)       /* Force flat help when prompting is not possible */
 #define SCP_HELP_ONECMD (1u << 30)       /* Display one topic, do not prompt */
 #define SCP_HELP_ATTACH (1u << 29)       /* Top level topic is ATTACH help */
-t_stat scp_help (FILE *st, struct sim_device *dptr,
-                 struct sim_unit *uptr, int32 flag, const char *help, const char *cptr, ...);
-t_stat scp_vhelp (FILE *st, struct sim_device *dptr,
-                  struct sim_unit *uptr, int32 flag, const char *help, const char *cptr, va_list ap);
-t_stat scp_helpFromFile (FILE *st, struct sim_device *dptr,
-                         struct sim_unit *uptr, int32 flag, const char *help, const char *cptr, ...);
-t_stat scp_vhelpFromFile (FILE *st, struct sim_device *dptr,
-                          struct sim_unit *uptr, int32 flag, const char *help, const char *cptr, va_list ap);
+t_stat scp_help (FILE *st, DEVICE *dptr,
+                 UNIT *uptr, int32 flag, const char *help, const char *cptr, ...);
+t_stat scp_vhelp (FILE *st, DEVICE *dptr,
+                  UNIT *uptr, int32 flag, const char *help, const char *cptr, va_list ap);
+t_stat scp_helpFromFile (FILE *st, DEVICE *dptr,
+                         UNIT *uptr, int32 flag, const char *help, const char *cptr, ...);
+t_stat scp_vhelpFromFile (FILE *st, DEVICE *dptr,
+                          UNIT *uptr, int32 flag, const char *help, const char *cptr, va_list ap);
 
 /* Global data */
 
@@ -220,14 +236,18 @@ extern int32 sim_interval;
 extern int32 sim_switches;
 extern int32 sim_quiet;
 extern int32 sim_step;
+extern t_stat sim_last_cmd_stat;                        /* Command Status */
 extern FILE *sim_log;                                   /* log file */
 extern FILEREF *sim_log_ref;                            /* log file file reference */
 extern FILE *sim_deb;                                   /* debug file */
 extern FILEREF *sim_deb_ref;                            /* debug file file reference */
 extern int32 sim_deb_switches;                          /* debug display flags */
 extern struct timespec sim_deb_basetime;                /* debug base time for relative time output */
+extern DEVICE **sim_internal_devices;
+extern uint32 sim_internal_device_count;
 extern UNIT *sim_clock_queue;
 extern int32 sim_is_running;
+extern t_bool sim_processing_event;                     /* Called from sim_process_event */
 extern char *sim_prompt;                                /* prompt string */
 extern const char *sim_savename;                        /* Simulator Name used in Save/Restore files */
 extern t_value *sim_eval;

@@ -698,11 +698,11 @@ MTAB rp_mod[] = {
 #define DBG_DAT  0x0010                                 /* display transfer data */
 
 DEBTAB rp_debug[] = {
-  {"TRACE",  DBG_TRC},
-  {"REG",    DBG_REG},
-  {"REQ",    DBG_REQ},
-  {"DISK",   DBG_DSK},
-  {"DATA",   DBG_DAT},
+  {"TRACE",  DBG_TRC, "trace routine calls"},
+  {"REG",    DBG_REG, "trace read/write registers"},
+  {"REQ",    DBG_REQ, "display transfer requests"},
+  {"DISK",   DBG_DSK, "display sim_disk activities"},
+  {"DATA",   DBG_DAT, "display transfer data"},
   {0}
 };
 
@@ -1252,7 +1252,7 @@ else { /* Bottom End (After I/O processing) */
                 rp_set_er (ER1_PAR, drv);               /* set drive error */
                 mba_set_exc (dibp->ba);                 /* set exception */
                 rp_update_ds (DS_ATA, drv);
-                perror ("RP I/O error");
+                sim_perror ("RP I/O error");
                 return SCPE_IOERR;
                 }
 

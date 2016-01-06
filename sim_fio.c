@@ -334,7 +334,7 @@ return (t_offset)(ftello64 (st));
 
 /* Apple OS/X */
 
-#if defined (__APPLE__) || defined (__FreeBSD__) || defined(__NetBSD__) || defined (__OpenBSD__) 
+#if defined (__APPLE__) || defined (__FreeBSD__) || defined(__NetBSD__) || defined (__OpenBSD__) || defined (__CYGWIN__) 
 #define S_SIM_IO_FSEEK_EXT_ 1
 int sim_fseeko (FILE *st, t_offset xpos, int origin) 
 {
@@ -459,6 +459,7 @@ struct SHMEM {
 
 t_stat sim_shmem_open (const char *name, size_t size, SHMEM **shmem, void **addr)
 {
+#ifdef HAVE_SHM_OPEN
 *shmem = (SHMEM *)calloc (1, sizeof(**shmem));
 
 *addr = NULL;
@@ -499,6 +500,9 @@ if ((*shmem)->shm_base == MAP_FAILED) {
     }
 *addr = (*shmem)->shm_base;
 return SCPE_OK;
+#else
+return SCPE_NOFNC;
+#endif
 }
 
 void sim_shmem_close (SHMEM *shmem)

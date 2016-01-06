@@ -27,12 +27,8 @@
    11-Jun-2013  MB      First version
 */
 
-#ifndef _SIM_VIDEO_H_
-#define _SIM_VIDEO_H_     0
-
-#if !defined(USE_SIM_VIDEO)
-#error This simulator MUST be compiled with USE_SIM_VIDEO defined
-#else
+#ifndef SIM_VIDEO_H_
+#define SIM_VIDEO_H_     0
 
 #include "sim_defs.h"
 
@@ -187,6 +183,7 @@ t_stat vid_set_release_key (FILE* st, UNIT* uptr, int32 val, void* desc);
 t_stat vid_show_release_key (FILE* st, UNIT* uptr, int32 val, void* desc);
 t_stat vid_show_video (FILE* st, UNIT* uptr, int32 val, void* desc);
 t_stat vid_show (FILE* st, DEVICE *dptr,  UNIT* uptr, int32 val, char* desc);
+t_stat vid_screenshot (const char *filename);
 
 extern t_bool vid_active;
 extern uint32 vid_mono_palette[2];
@@ -205,7 +202,5 @@ void vid_set_cursor_position (int32 x, int32 y);        /* cursor position (set 
 #if HAVE_LIBSDL
 #include <SDL.h>
 #endif /* HAVE_LIBSDL */
-
-#endif /* USE_SIM_VIDEO */
 
 #endif

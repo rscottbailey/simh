@@ -493,8 +493,8 @@ static t_stat kmc_setLineSpeed (UNIT *txup, int32 val, char *cptr, void *desc);
 static t_stat kmc_showLineSpeed (FILE *st, UNIT *txup, int32 val, void *desc);
 static t_stat kmc_showStatus (FILE *st, UNIT *up, int32 v, void *dp);
 
-static t_stat kmc_help (FILE *st, struct sim_device *dptr,
-                        struct sim_unit *uptr, int32 flag, const char *cptr); 
+static t_stat kmc_help (FILE *st, DEVICE *dptr,
+                        UNIT *uptr, int32 flag, const char *cptr); 
 static const char *kmc_description (DEVICE *dptr);
 
 /* Global data */
@@ -1756,7 +1756,7 @@ static void kmc_baseIn (int32 k, dupstate *d, uint16 cmdsel2, uint8 line) {
     csraddress = sel6 & SEL6_II_DUPCSR;
 
     if ((sel4 != 0) || (cmdsel2 & SEL2_II_RESERVED)) {
-        sim_debug (DF_ERR, &kmc_dev, "KMC%u: BASE IN reserved bits set\n");
+        sim_debug (DF_ERR, &kmc_dev, "KMC%u: BASE IN reserved bits set\n", k);
         kmc_halt (k, HALT_BADCSR);
         return;
     }
@@ -1839,7 +1839,7 @@ static void kmc_ctrlIn (int32 k, dupstate *d, int line) {
                       (sel6 & SEL6_CI_DDCMP)? "DDCMP":"Bit-stuffing",
                       (sel6 & SEL6_CI_HDX)? "half" : "full");
             if (sel6 & SEL6_CI_ENASS) {
-                sim_debug (DF_CMD, &kmc_dev, " SS:%u",
+                sim_debug (DF_CMD, &kmc_dev, " SS:%u-%d",
                           (sel6 & SEL6_CI_SADDR), line);
             }
             sim_debug (DF_CMD, &kmc_dev, "\n");
@@ -2941,8 +2941,8 @@ t_stat kmc_showStatus (FILE *st, UNIT *up, int32 v,  void *dp) {
  *
  */
 
-static t_stat kmc_help (FILE *st, struct sim_device *dptr,
-                         struct sim_unit *uptr, int32 flag, const char *cptr) {
+static t_stat kmc_help (FILE *st, DEVICE *dptr,
+                         UNIT *uptr, int32 flag, const char *cptr) {
     const char *const text =
 " The KMC11-A is a general purpose microprocessor that is used in\n"
 " several DEC products.  The KDP is an emulation of one of those\n"

@@ -25,6 +25,11 @@
 
    15-Jan-15    MP      Initial implementation
    01-Apr-15    MP      Added register indirect, mem_examine and mem_deposit
+   03-Apr-15    MP      Added logic to pass simulator startup messages in
+                        panel error text if the connection to the simulator
+                        shuts down while it is starting.
+   04-Apr-15    MP      Added mount and dismount routines to connect and 
+                        disconnect removable media
 
    This module defines interface between a front panel application and a simh
    simulator.  Facilities provide ways to gather information from and to 
@@ -50,7 +55,7 @@ extern "C" {
 
 #include <stdlib.h>
 
-#if !defined(__VAX)         /* Supported platform */
+#if !defined(__VAX)         /* Unsupported platform */
 
 #define SIM_FRONTPANEL_VERSION   1
 
@@ -126,6 +131,7 @@ sim_panel_destroy (PANEL *panel);
    access to are described by the application by calling: 
    
    sim_panel_add_register
+   sim_panel_add_register_array
 and
    sim_panel_add_register_indirect
 
@@ -133,6 +139,7 @@ and
         device_name  the device this register is part of.  Defaults to
                      the device of the panel (in a device panel) or the
                      default device in the simulator (usually the CPU).
+        element_count number of elements in the register array
         size         the size (in local storage) of the buffer which will
                      receive the data in the simulator's register
         addr         a pointer to the location of the buffer which will 
@@ -145,6 +152,14 @@ sim_panel_add_register (PANEL *panel,
                         const char *device_name,
                         size_t size,
                         void *addr);
+
+int
+sim_panel_add_register_array (PANEL *panel,
+                              const char *name,
+                              const char *device_name,
+                              size_t element_count,
+                              size_t size,
+                              void *addr);
 
 int
 sim_panel_add_register_indirect (PANEL *panel,
@@ -166,10 +181,14 @@ sim_panel_add_register_indirect (PANEL *panel,
            the current register state at the desired rate.
 
 
-   Note 1: The buffers described in a panel's register set will be dynamically
-           revised as soon as data is available from the simulator.  The 
-           callback routine merely serves as a notification that a complete 
-           register set has arrived.
+   Note 1: The buffers described in a panel's register set will be 
+           dynamically revised as soon as data is available from the 
+           simulator.  The callback routine merely serves as a notification 
+           that a complete register set has arrived.
+   Note 2: The callback routine should, in general, not run for a long time
+           or frontpanel interactions with the simulator may be disrupted.  
+           Setting a flag, signaling an event or posting a message are 
+           reasonable activities to perform in a callback routine.
 
  */
 int
@@ -223,7 +242,8 @@ sim_panel_exec_step (PANEL *panel);
     sim_panel_gen_deposit        - Deposit to register or memory
     sim_panel_mem_examine        - Examine memory location
     sim_panel_mem_deposit        - Deposit to memory location
-    sim_panel_set_register_value - 
+    sim_panel_set_register_value - Deposit to a register or memory 
+                                   location
 
  */
 
@@ -320,6 +340,42 @@ sim_panel_set_register_value (PANEL *panel,
                               const char *name,
                               const char *value);
 
+/**
+
+    When a front panel application may needs to change the media
+    in a simulated removable media device one of the following 
+    routines should be called:
+
+    sim_panel_mount    - mounts the indicated media file on a device
+    sim_panel_dismount - dismounts the currently mounted media file 
+                         from a device
+
+ */
+
+/**
+   sim_panel_mount
+
+        device      the name of a simulator device/unit
+        switches    any switches appropriate for the desire attach
+        path        the path on the local system to be attached
+
+ */
+int
+sim_panel_mount (PANEL *panel,
+                 const char *device,
+                 const char *switches,
+                 const char *path);
+
+/**
+   sim_panel_dismount
+
+        device      the name of a simulator device/unit
+
+ */
+int
+sim_panel_dismount (PANEL *panel,
+                    const char *device);
+
 
 typedef enum {
     Halt,       /* Simulation is halted (instructions not being executed) */
@@ -336,6 +392,8 @@ sim_panel_get_state (PANEL *panel);
 
     All APIs routines which return an int return 0 for 
     success and -1 for an error.  
+
+    An API which returns an error (-1), will not change the panel state.
     
     sim_panel_get_error     - the details of the most recent error
     sim_panel_clear_error   - clears the error buffer

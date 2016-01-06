@@ -1,6 +1,6 @@
 /* pdp11_defs.h: PDP-11 simulator definitions
 
-   Copyright (c) 1993-2011, Robert M Supnik
+   Copyright (c) 1993-2015, Robert M Supnik
 
    Permission is hereby granted, free of charge, to any person obtaining a
    copy of this software and associated documentation files (the "Software"),
@@ -26,6 +26,7 @@
    The author gratefully acknowledges the help of Max Burnet, Megan Gentry,
    and John Wilson in resolving questions about the PDP-11
 
+   30-Dec-15    RMS     Added NOBVT option
    23-Oct-13    RMS     Added cpu_set_boot prototype
    02-Sep-13    RMS     Added third Massbus adapter and RS drive
    11-Dec-11    RMS     Fixed priority of PIRQ vs IO; added INT_INTERNALn
@@ -106,6 +107,7 @@
 #define MEMSIZE         (cpu_unit.capac)
 #define ADDR_IS_MEM(x)  (((t_addr) (x)) < cpu_memsize)  /* use only in sim! */
 #define DMASK           0177777
+#define BMASK           0377
 
 /* CPU models */
 
@@ -173,6 +175,7 @@
 #define OPT_RH11        (1u << 6)                       /* RH11 */
 #define OPT_PAR         (1u << 7)                       /* parity */
 #define OPT_UBM         (1u << 8)                       /* UBM */
+#define OPT_BVT         (1u << 9)                       /* BEVENT */
 
 #define CPUT(x)         ((cpu_type & (x)) != 0)
 #define CPUO(x)         ((cpu_opt & (x)) != 0)
@@ -518,6 +521,12 @@ struct pdp_dib {
     uint32              ulnt;                           /* IO length per-device */
                                                         /* Only need to be populated */
                                                         /* when numunits != num devices */
+    int32               numc;                           /* Number of controllers */
+                                                        /* this field handles devices */
+                                                        /* where multiple instances are */
+                                                        /* simulated through a single */
+                                                        /* DEVICE structure (e.g., DZ, VH, DL, DC). */
+                                                        /* Populated by auto-configure */
     };
 
 typedef struct pdp_dib DIB;
@@ -633,6 +642,8 @@ typedef struct pdp_dib DIB;
 #define INT_V_VTCH      15
 #define INT_V_VTNM      16
 #define INT_V_LK        17
+#define INT_V_TDRX      18
+#define INT_V_TDTX      19
 
 #define INT_V_PIR3      0                               /* BR3 */
 #define INT_V_PIR2      0                               /* BR2 */
@@ -690,6 +701,8 @@ typedef struct pdp_dib DIB;
 #define INT_PIR3        (1u << INT_V_PIR3)
 #define INT_PIR2        (1u << INT_V_PIR2)
 #define INT_PIR1        (1u << INT_V_PIR1)
+#define INT_TDRX        (1u << INT_V_TDRX)
+#define INT_TDTX        (1u << INT_V_TDTX)
 
 #define INT_INTERNAL7   (INT_PIR7)
 #define INT_INTERNAL6   (INT_PIR6 | INT_CLK)
@@ -744,6 +757,8 @@ typedef struct pdp_dib DIB;
 #define IPL_VTCH        4
 #define IPL_VTNM        4
 #define IPL_LK          4           /* XXX just a guess */
+#define IPL_TDRX        4
+#define IPL_TDTX        4
 
 #define IPL_PIR7        7
 #define IPL_PIR6        6
@@ -757,8 +772,6 @@ typedef struct pdp_dib DIB;
 
 #define VEC_AUTO        (0)                             /* Assigned by Auto Configure */
 #define VEC_FLOAT       (0)                             /* Assigned by Auto Configure */
-
-#define VEC_Q           0000                            /* vector base */
 
 /* Processor specific internal fixed vectors */
 #define VEC_PIRQ        0240

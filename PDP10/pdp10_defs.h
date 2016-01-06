@@ -699,6 +699,7 @@ typedef struct pdp_dib DIB;
 #define INT_V_KMCB      9
 #define INT_V_DMCRX     10                              /* DMC11/DMR11 */
 #define INT_V_DMCTX     11
+#define INT_V_XU        15                              /* DEUNA/DELUA */
 #define INT_V_DZRX      16                              /* DZ11 */
 #define INT_V_DZTX      17
 #define INT_V_RY        18                              /* RX211 */
@@ -750,7 +751,6 @@ typedef struct pdp_dib DIB;
 #define INT_IPL5        0x000FFF00
 #define INT_IPL4        0x7FF00000
 
-#define VEC_Q           0000                            /* vector base */
 #define VEC_TU          0224                            /* interrupt vectors */
 #define VEC_RP          0254
 #define VEC_LP20        0754

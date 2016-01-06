@@ -196,7 +196,15 @@ typedef struct {
     int32               vloc;                           /* locator */
     int32               vec;                            /* value */
     int32               (*ack[VEC_DEVMAX])(void);       /* ack routine */
-    uint32              ulnt;                           /* IO length per unit */
+    uint32              ulnt;                           /* IO length per-device */
+                                                        /* Only need to be populated */
+                                                        /* when numunits != num devices */
+    int32               numc;                           /* Number of controllers */
+                                                        /* this field handles devices */
+                                                        /* where multiple instances are */
+                                                        /* simulated through a single */
+                                                        /* DEVICE structure (e.g., DZ, VH, DL, DC). */
+                                                        /* Populated by auto-configure */
     } DIB;
 
 /* Qbus I/O page layout - see pdp11_io_lib.c for address layout details */
@@ -242,6 +250,8 @@ typedef struct {
 #define INT_V_QDSS      19                              /* QDSS */
 #define INT_V_CR        20
 #define INT_V_QVSS      21                              /* QVSS */
+#define INT_V_TDRX      22
+#define INT_V_TDTX      23
 
 #define INT_CLK         (1u << INT_V_CLK)
 #define INT_RQ          (1u << INT_V_RQ)
@@ -266,6 +276,8 @@ typedef struct {
 #define INT_QDSS        (1u << INT_V_QDSS)
 #define INT_CR          (1u << INT_V_CR)
 #define INT_QVSS        (1u << INT_V_QVSS)
+#define INT_TDRX        (1u << INT_V_TDRX)
+#define INT_TDTX        (1u << INT_V_TDTX)
 
 #define IPL_CLK         (0x16 - IPL_HMIN)                       /* relative IPL */
 #define IPL_RQ          (0x14 - IPL_HMIN)
@@ -290,6 +302,8 @@ typedef struct {
 #define IPL_QDSS        (0x14 - IPL_HMIN)
 #define IPL_CR          (0x14 - IPL_HMIN)
 #define IPL_QVSS        (0x14 - IPL_HMIN)
+#define IPL_TDRX        (0x14 - IPL_HMIN)
+#define IPL_TDTX        (0x14 - IPL_HMIN)
 
 #define IPL_HMAX        0x17                            /* highest hwre level */
 #define IPL_HMIN        0x14                            /* lowest hwre level */
@@ -302,7 +316,7 @@ typedef struct {
 #define VEC_FLOAT       (0)                             /* Assigned by Auto Configure */
 
 #define VEC_QBUS        1                               /* Qbus system */
-#define VEC_Q           0x200                           /* Qbus vector offset */
+#define VEC_SET         0x201                           /* Vector bits to set in Qbus vectors */
 
 /* Interrupt macros */
 

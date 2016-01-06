@@ -570,7 +570,7 @@ struct tq_req_results {           /* intermediate State during tape motion comma
 
 t_stat tq_rd (int32 *data, int32 PA, int32 access)
 {
-sim_debug(DBG_REG, &tq_dev, "tq_rd(PA=0x%08X [%s], access=%d)\n", PA, ((PA >> 1) & 01) ? "IP" : "SA", access);
+sim_debug(DBG_REG, &tq_dev, "tq_rd(PA=0x%08X [%s], access=%d)=0x%04X\n", PA, ((PA >> 1) & 01) ? "SA" : "IP", access, ((PA >> 1) & 01) ? tq_sa : 0);
 
 switch ((PA >> 1) & 01) {                               /* decode PA<1> */
     case 0:                                             /* IP */
@@ -593,7 +593,7 @@ return SCPE_OK;
 
 t_stat tq_wr (int32 data, int32 PA, int32 access)
 {
-sim_debug(DBG_REG, &tq_dev, "tq_wr(PA=0x%08X [%s], access=%d)\n", PA, ((PA >> 1) & 01) ? "IP" : "SA", access);
+sim_debug(DBG_REG, &tq_dev, "tq_wr(PA=0x%08X [%s], access=%d, data=0x%04X)\n", PA, ((PA >> 1) & 01) ? "SA" : "IP", access, data);
 
 switch ((PA >> 1) & 01) {                               /* decode PA<1> */
 
@@ -678,8 +678,6 @@ if (tq_csta < CST_UP) {                                 /* still init? */
             else {
                 tq_s1dat = tq_saw;                      /* save data */
                 tq_dib.vec = (tq_s1dat & SA_S1H_VEC) << 2; /* get vector */
-                if (tq_dib.vec)                         /* if nz, bias */
-                    tq_dib.vec = tq_dib.vec + VEC_Q;
                 tq_sa = SA_S2 | SA_S2C_PT | SA_S2C_EC (tq_s1dat);
                 tq_csta = CST_S2;                       /* now in step 2 */
                 tq_init_int ();                         /* intr if req */
@@ -744,7 +742,7 @@ if ((pkt == 0) && tq_pip) {                             /* polling? */
         UNIT *up = tq_getucb (tq_pkt[pkt].d[CMD_UN]);
 
         if (up)
-            sim_debug (DBG_REQ, &tq_dev, "cmd=%04X(%3s), mod=%04X, unit=%d, bc=%04X%04X, ma=%04X%04X, obj=%d, pos=0x%X\n", 
+            sim_debug (DBG_REQ, &tq_dev, "cmd=%04X(%3s), mod=%04X, unit=%d, bc=%04X%04X, ma=%04X%04X, obj=%d, pos=0x%" T_ADDR_FMT "X\n", 
                     tq_pkt[pkt].d[CMD_OPC], tq_cmdname[tq_pkt[pkt].d[CMD_OPC]&0x3f],
                     tq_pkt[pkt].d[CMD_MOD], tq_pkt[pkt].d[CMD_UN],
                     tq_pkt[pkt].d[RW_BCH], tq_pkt[pkt].d[RW_BCL],
@@ -1314,7 +1312,7 @@ struct tq_req_results *res = (struct tq_req_results *)uptr->results;
 int32 io_complete = res->io_complete;
 
 sim_debug (DBG_TRC, &tq_dev, "tq_svc(unit=%d, pkt=%d, cmd=%s, mdf=0x%0X, bc=0x%0x, phase=%s)\n",
-           uptr-tq_dev.units, pkt, tq_cmdname[tq_pkt[pkt].d[CMD_OPC]&0x3f], mdf, bc,
+           (int)(uptr-tq_dev.units), pkt, tq_cmdname[tq_pkt[pkt].d[CMD_OPC]&0x3f], mdf, bc,
            uptr->io_complete ? "bottom" : "top");
 
 res->io_complete = 0;
@@ -1497,7 +1495,7 @@ t_stat tq_mot_err (UNIT *uptr, uint32 rsiz)
 uptr->flags = (uptr->flags | UNIT_SXC) & ~UNIT_TMK;     /* serious exception */
 if (tq_dte (uptr, ST_DRV))                              /* post err log */
     tq_mot_end (uptr, EF_LOG, ST_DRV, rsiz);            /* if ok, report err */
-perror ("TQ I/O error");
+sim_perror ("TQ I/O error");
 clearerr (uptr->fileref);
 return SCPE_IOERR;
 }
@@ -1824,7 +1822,7 @@ UNIT *up = tq_getucb (tq_pkt[pkt].d[CMD_UN]);
 if (pkt == 0)                                           /* any packet? */
     return OK;
 if (up)
-    sim_debug (DBG_REQ, &tq_dev, "rsp=%04X, sts=%04X, rszl=%04X, obj=%d, pos=%d\n", 
+    sim_debug (DBG_REQ, &tq_dev, "rsp=%04X, sts=%04X, rszl=%04X, obj=%d, pos=%" T_ADDR_FMT "d\n", 
                                tq_pkt[pkt].d[RSP_OPF], tq_pkt[pkt].d[RSP_STS], tq_pkt[pkt].d[RW_RSZL],
                                up->objp, up->pos);
 else
