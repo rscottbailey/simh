@@ -3716,7 +3716,13 @@ fprintf (st, "Idle detection is disabled by default.  Unless ALL is specified, i
 fprintf (st, "detection is operating system specific.  If idle detection is enabled with\n");
 fprintf (st, "an incorrect operating system setting, simulator performance or correct\n");
 fprintf (st, "functionality could be impacted.  The default operating system setting is\n");
+<<<<<<< HEAD
 fprintf (st, "VMS.\n\n");
+=======
+fprintf (st, "VMS.  The value 'n', if present in the \"SET CPU IDLE={OS}:n\" command,\n");
+fprintf (st, "indicats the number of seconds which the simulator must run before idling\n");
+fprintf (st, "starts.\n\n");
+>>>>>>> c8cd853102c289a8aa35403d0f0a7cf41a584c68
 fprintf (st, "The CPU can maintain a history of the most recently executed instructions.\n");
 fprintf (st, "This is controlled by the SET CPU HISTORY and SHOW CPU HISTORY commands:\n\n");
 fprintf (st, "   sim> SET CPU HISTORY                 clear history buffer\n");
