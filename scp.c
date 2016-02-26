@@ -221,9 +221,7 @@
 #include "sim_tape.h"
 #include "sim_ether.h"
 #include "sim_serial.h"
-#if defined (USE_SIM_VIDEO)
 #include "sim_video.h"
-#endif
 #include "sim_sock.h"
 #include "sim_frontpanel.h"
 #include <signal.h>
@@ -347,7 +345,7 @@ char* (*sim_vm_read) (char *ptr, int32 size, FILE *stream) = NULL;
 void (*sim_vm_post) (t_bool from_scp) = NULL;
 CTAB *sim_vm_cmd = NULL;
 void (*sim_vm_fprint_addr) (FILE *st, DEVICE *dptr, t_addr addr) = NULL;
-t_addr (*sim_vm_parse_addr) (DEVICE *dptr, char *cptr, char **tptr) = NULL;
+t_addr (*sim_vm_parse_addr) (DEVICE *dptr, const char *cptr, const char **tptr) = NULL;
 t_value (*sim_vm_pc_value) (void) = NULL;
 t_bool (*sim_vm_is_subroutine_call) (t_addr **ret_addrs) = NULL;
 t_bool (*sim_vm_fprint_stopped) (FILE *st, t_stat reason) = NULL;
@@ -949,6 +947,13 @@ static const char simh_help[] =
 #define HLP_LS          "*Commands Listing_Files LS"
       "3LS\n"
       "++LS {path}                 list directory files\n"
+      "2Displaying Files\n"
+#define HLP_TYPE         "*Commands Displaying_Files TYPE"
+      "3TYPE\n"
+      "++TYPE {file}               display a file contents\n"
+#define HLP_CAT          "*Commands Displaying_Files CAT"
+      "3CAT\n"
+      "++CAT {file}                display a file contents\n"
 #define HLP_SET         "*Commands SET"
       "2SET\n"
        /***************** 80 character line width template *************************/
@@ -1726,6 +1731,8 @@ static CTAB cmd_table[] = {
     { "PWD",        &pwd_cmd,       0,          HLP_PWD },
     { "DIR",        &dir_cmd,       0,          HLP_DIR },
     { "LS",         &dir_cmd,       0,          HLP_LS },
+    { "TYPE",       &type_cmd,      0,          HLP_TYPE },
+    { "CAT",        &type_cmd,      0,          HLP_CAT },
     { "SET",        &set_cmd,       0,          HLP_SET },
     { "SHOW",       &show_cmd,      0,          HLP_SHOW },
     { "DO",         &do_cmd,        1,          HLP_DO },
@@ -2007,6 +2014,7 @@ detach_all (0, TRUE);                                   /* close files */
 sim_set_deboff (0, NULL);                               /* close debug */
 sim_set_logoff (0, NULL);                               /* close log */
 sim_set_notelnet (0, NULL);                             /* close Telnet */
+vid_close ();                                           /* close video */
 sim_ttclose ();                                         /* close console */
 AIO_CLEANUP;                                            /* Asynch I/O */
 sim_cleanup_sock ();                                    /* cleanup sockets */
@@ -2111,8 +2119,8 @@ return SCPE_EXIT;
 /* Used when sorting a list of command names */
 static int _cmd_name_compare (const void *pa, const void *pb)
 {
-CTAB **a = (CTAB **)pa;
-CTAB **b = (CTAB **)pb;
+CTAB * const *a = (CTAB * const *)pa;
+CTAB * const *b = (CTAB * const *)pb;
 
 return strcmp((*a)->name, (*b)->name);
 }
@@ -3053,8 +3061,29 @@ for (; *ip && (op < oend); ) {
                         sprintf (rbuf, "%d", (tmnow->tm_year + 1900)/100);
                         ap = rbuf;
                         }
+                    else if ((!strcmp ("DATE_19XX_YY", gbuf)) || /* Year with same calendar */
+                             (!strcmp ("DATE_19XX_YYYY", gbuf))) {
+                        int year = tmnow->tm_year + 1900;
+                        int days = year - 2001;
+                        int leaps = days/4 - days/100 + days/400;
+                        int lyear = ((year % 4) == 0) && (((year % 100) != 0) || ((year % 400) == 0));
+                        int selector = ((days + leaps + 7) % 7) + lyear * 7;
+                        static int years[] = {90, 91, 97, 98, 99, 94, 89, 
+                                              96, 80, 92, 76, 88, 72, 84};
+                        int cal_year = years[selector];
+
+                        if (!strcmp ("DATE_19XX_YY", gbuf))
+                            sprintf (rbuf, "%d", cal_year);        /* 2 digit year */
+                        else
+                            sprintf (rbuf, "%d", cal_year + 1900); /* 4 digit year */
+                        ap = rbuf;
+                        }
                     else if (!strcmp ("DATE_MM", gbuf)) {/* Month number (01-12) */
                         strftime (rbuf, sizeof(rbuf), "%m", tmnow);
+                        ap = rbuf;
+                        }
+                    else if (!strcmp ("DATE_MMM", gbuf)) {/* Month number (01-12) */
+                        strftime (rbuf, sizeof(rbuf), "%b", tmnow);
                         ap = rbuf;
                         }
                     else if (!strcmp ("DATE_DD", gbuf)) {/* Day of Month (01-31) */
@@ -3306,7 +3335,7 @@ else {
         }
     else {                                              /* not reg, check for memory */
         if (sim_dfdev && sim_vm_parse_addr)             /* get addr */
-            addr = sim_vm_parse_addr (sim_dfdev, (char *)gbuf, (char **)&gptr);
+            addr = sim_vm_parse_addr (sim_dfdev, gbuf, &gptr);
         else addr = (t_addr) strtotv (gbuf, &gptr, sim_dfdev->dradix);
         if (gbuf == gptr)                               /* error? */
             return SCPE_NXREG;
@@ -4339,9 +4368,7 @@ if (flag) {
     fprintf (st, "\n\t\tMemory Access: %s Endian", sim_end ? "Little" : "Big");
     fprintf (st, "\n\t\tMemory Pointer Size: %d bits", (int)sizeof(dptr)*8);
     fprintf (st, "\n\t\t%s", sim_toffset_64 ? "Large File (>2GB) support" : "No Large File support");
-#if defined (USE_SIM_VIDEO)
     fprintf (st, "\n\t\tSDL Video support: %s", vid_version());
-#endif
 #if defined (HAVE_PCREPOSIX_H)
     fprintf (st, "\n\t\tPCRE RegEx support for EXPECT commands");
 #elif defined (HAVE_REGEX_H)
@@ -4364,14 +4391,45 @@ if (flag) {
         fprintf (st, "\n\t\tOS: OpenVMS %s %s", arch, __VMS_VERSION);
         }
 #elif defined(_WIN32)
-    fprintf (st, "\n\t\tOS: Windows: ");
-    fflush (st);
-    system ("ver");
-    system ("echo \t\t%PROCESSOR_IDENTIFIER% - %PROCESSOR_ARCHITECTURE%-%PROCESSOR_ARCHITEW6432%");
+    if (1) {
+        char *proc_id = getenv ("PROCESSOR_IDENTIFIER");
+        char *arch = getenv ("PROCESSOR_ARCHITECTURE");
+        char *procs = getenv ("NUMBER_OF_PROCESSORS");
+        char *proc_level = getenv ("PROCESSOR_LEVEL");
+        char *proc_rev = getenv ("PROCESSOR_REVISION");
+        char *proc_arch3264 = getenv ("PROCESSOR_ARCHITEW6432");
+        char osversion[PATH_MAX+1] = "";
+        FILE *f;
+
+        if ((f = _popen ("ver", "r"))) {
+            memset (osversion, 0, sizeof(osversion));
+            do {
+                if (NULL == fgets (osversion, sizeof(osversion)-1, f))
+                    break;
+                sim_trim_endspc (osversion);
+                } while (osversion[0] == '\0');
+            _pclose (f);
+            }
+        fprintf (st, "\n\t\tOS: %s", osversion);
+        fprintf (st, "\n\t\tArchitecture: %s%s%s, Processors: %s", arch, proc_arch3264 ? " on " : "", proc_arch3264 ? proc_arch3264  : "", procs);
+        fprintf (st, "\n\t\tProcessor Id: %s, Level: %s, Revision: %s", proc_id ? proc_id : "", proc_level ? proc_level : "", proc_rev ? proc_rev : "");
+        }
 #else
-    fprintf (st, "\n\t\tOS: ");
-    fflush (st);
-    system ("uname -a");
+    if (1) {
+        char osversion[2*PATH_MAX+1] = "";
+        FILE *f;
+        
+        if ((f = popen ("uname -a", "r"))) {
+            memset (osversion, 0, sizeof(osversion));
+            do {
+                if (NULL == fgets (osversion, sizeof(osversion)-1, f))
+                    break;
+                sim_trim_endspc (osversion);
+                } while (osversion[0] == '\0');
+            pclose (f);
+            }
+        fprintf (st, "\n\t\tOS: %s", osversion);
+        }
 #endif
     }
 #if defined(SIM_GIT_COMMIT_ID)
@@ -4893,6 +4951,25 @@ return SCPE_OK;
 }
 
 #endif /* !defined(_WIN32) */
+
+
+t_stat type_cmd (int32 flg, char *cptr)
+{
+FILE *file;
+char lbuf[CBUFSIZE*2];
+
+if ((!cptr) || (*cptr == 0))
+    return SCPE_2FARG;
+sim_trim_endspc(cptr);
+file = sim_fopen (cptr, "r");
+if (file == NULL)                           /* open failed? */
+    return SCPE_OPENERR;
+lbuf[sizeof(lbuf)-1] = '\0';
+while (fgets (lbuf, sizeof(lbuf)-1, file))
+    sim_printf ("%s", lbuf);
+fclose (file);
+return SCPE_OK;
+}
 
 /* Breakpoint commands */
 
@@ -5452,7 +5529,7 @@ return SCPE_OK;
 
 const char *sim_dname (DEVICE *dptr)
 {
-return (dptr->lname? dptr->lname: dptr->name);
+return (dptr ? (dptr->lname? dptr->lname: dptr->name) : "");
 }
 
 /* Get unit display name */
@@ -5974,7 +6051,7 @@ if ((flag == RU_RUN) || (flag == RU_GO)) {              /* run or go */
         if (*cptr != 0)                                 /* should be end */
             return SCPE_2MARG;
         if (sim_vm_parse_addr)                          /* address parser? */
-            pcv = sim_vm_parse_addr (sim_dflt_dev, gbuf, (char **)&tptr);
+            pcv = sim_vm_parse_addr (sim_dflt_dev, gbuf, &tptr);
         else pcv = strtotv (gbuf, &tptr, sim_PC->radix);/* parse PC */
         if ((tptr == gbuf) || (*tptr != 0) ||           /* error? */
             (pcv > width_mask[sim_PC->width]))
@@ -6643,7 +6720,8 @@ t_stat dep_reg (int32 flag, char *cptr, REG *rptr, uint32 idx)
 t_stat r;
 t_value val, mask;
 int32 rdx;
-char *tptr, gbuf[CBUFSIZE];
+const char *tptr;
+char gbuf[CBUFSIZE];
 
 if ((cptr == NULL) || (rptr == NULL))
     return SCPE_IERR;
@@ -7283,7 +7361,7 @@ else {
         }
     else {
         if (dptr && sim_vm_parse_addr)                      /* get low */
-            *lo = sim_vm_parse_addr (dptr, (char *)cptr, (char **)&tptr);
+            *lo = sim_vm_parse_addr (dptr, cptr, &tptr);
         else
             *lo = (t_addr) strtotv (cptr, &tptr, rdx);
         if (cptr == tptr)                                   /* error? */
@@ -7291,7 +7369,7 @@ else {
         if ((*tptr == '-') || (*tptr == ':')) {             /* range? */
             cptr = tptr + 1;
             if (dptr && sim_vm_parse_addr)                  /* get high */
-                *hi = sim_vm_parse_addr (dptr, (char *)cptr, (char **)&tptr);
+                *hi = sim_vm_parse_addr (dptr, cptr, &tptr);
             else *hi = (t_addr) strtotv (cptr, &tptr, rdx);
             if (cptr == tptr)
                 return NULL;
@@ -7938,7 +8016,7 @@ for (logop = cmpop = -1; (c = *cptr++); ) {             /* loop thru clauses */
         logval = strtotv (cptr, &tptr, radix);
         if (cptr == tptr)
             return NULL;
-        cptr = (char *)tptr;
+        cptr = tptr;
         }
     else if ((sptr = strchr (cmpstr, c))) {             /* check for boolop */
         cmpop = (int32)(sptr - cmpstr);
@@ -7949,7 +8027,7 @@ for (logop = cmpop = -1; (c = *cptr++); ) {             /* loop thru clauses */
         cmpval = strtotv (cptr, &tptr, radix);
         if (cptr == tptr)
             return NULL;
-        cptr = (char *)tptr;
+        cptr = tptr;
         }
     else return NULL;
     }                                                   /* end for */
@@ -8152,10 +8230,10 @@ int32 nodigit;
 t_value val;
 uint32 c, digit;
 
-*endptr = (char *)inptr;                                /* assume fails */
+*endptr = inptr;                                        /* assume fails */
 if ((radix < 2) || (radix > 36))
     return 0;
-while (sim_isspace (*inptr))                                /* bypass white space */
+while (sim_isspace (*inptr))                            /* bypass white space */
     inptr++;
 val = 0;
 nodigit = 1;
@@ -8174,7 +8252,7 @@ for (c = *inptr; sim_isalnum(c); c = *++inptr) {        /* loop through char */
     }
 if (nodigit)                                            /* no digits? */
     return 0;
-*endptr = (char *)inptr;                                /* result pointer */
+*endptr = inptr;                                        /* result pointer */
 return val;
 }
 
@@ -9021,7 +9099,7 @@ return SCPE_OK;
 
 /* Set expect */
 
-t_stat sim_set_expect (EXPECT *exp, char *cptr)
+t_stat sim_set_expect (EXPECT *exp, const char *cptr)
 {
 char gbuf[CBUFSIZE], *tptr;
 const char *c1ptr;
@@ -9035,7 +9113,7 @@ if (*cptr == '[') {
     cnt = (int32) strtotv (cptr + 1, &c1ptr, 10);
     if ((cptr == c1ptr) || (*c1ptr != ']'))
         return sim_messagef (SCPE_ARG, "Invalid Repeat count specification\n");
-    cptr = (char *)(c1ptr + 1);
+    cptr = c1ptr + 1;
     while (sim_isspace(*cptr))
         ++cptr;
     }
@@ -9055,7 +9133,7 @@ return sim_exp_set (exp, gbuf, cnt, (after ? after : exp->after), sim_switches, 
 
 /* Clear expect */
 
-t_stat sim_set_noexpect (EXPECT *exp, char *cptr)
+t_stat sim_set_noexpect (EXPECT *exp, const char *cptr)
 {
 char gbuf[CBUFSIZE];
 
@@ -9136,7 +9214,7 @@ return SCPE_OK;
 
 /* Set/Add an expect rule */
 
-t_stat sim_exp_set (EXPECT *exp, const char *match, int32 cnt, uint32 after, int32 switches, char *act)
+t_stat sim_exp_set (EXPECT *exp, const char *match, int32 cnt, uint32 after, int32 switches, const char *act)
 {
 EXPTAB *ep;
 uint8 *match_buf;
@@ -9179,7 +9257,7 @@ else {
         free (match_buf);
         return sim_messagef (SCPE_ARG, "Case independed matching is only valid for RegEx expect rules\n");
         }
-    sim_data_trace(exp->dptr, exp->dptr->units, (uint8 *)match, "", strlen(match)+1, "Expect Match String", exp->dbit);
+    sim_data_trace(exp->dptr, exp->dptr->units, (const uint8 *)match, "", strlen(match)+1, "Expect Match String", exp->dbit);
     if (SCPE_OK != sim_decode_quoted_string (match, match_buf, &match_size)) {
         free (match_buf);
         return sim_messagef (SCPE_ARG, "Invalid quoted string\n");
@@ -9215,7 +9293,7 @@ if (switches & EXP_TYP_REGEX) {
     match_buf = NULL;
     }
 else {
-    sim_data_trace(exp->dptr, exp->dptr->units, (uint8 *)match, "", strlen(match)+1, "Expect Match String", exp->dbit);
+    sim_data_trace(exp->dptr, exp->dptr->units, (const uint8 *)match, "", strlen(match)+1, "Expect Match String", exp->dbit);
     sim_decode_quoted_string (match, match_buf, &match_size);
     ep->match = match_buf;
     ep->size = match_size;
@@ -9610,6 +9688,7 @@ static const char *get_dbg_verb (uint32 dbits, DEVICE* dptr)
 {
 static const char *debtab_none    = "DEBTAB_ISNULL";
 static const char *debtab_nomatch = "DEBTAB_NOMATCH";
+const char *some_match = NULL;
 int32 offset = 0;
 
 if (dptr->debflags == 0)
@@ -9618,11 +9697,13 @@ if (dptr->debflags == 0)
 /* Find matching words for bitmask */
 
 while (dptr->debflags[offset].name && (offset < 32)) {
-    if (dptr->debflags[offset].mask & dbits)
+    if (dptr->debflags[offset].mask == dbits)   /* All Bits Match */
         return dptr->debflags[offset].name;
+    if (dptr->debflags[offset].mask & dbits)
+        some_match = dptr->debflags[offset].name;
     offset++;
     }
-return debtab_nomatch;
+return some_match ? some_match : debtab_nomatch;
 }
 
 /* Prints standard debug prefix unless previous call unterminated */

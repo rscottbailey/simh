@@ -30,7 +30,7 @@
 #include "vax_defs.h"
 
 #if defined(VAX_620)
-char sim_name[] = "rtVAX1000 (KA620)";
+char sim_name[32] = "rtVAX1000 (KA620)";
 
 void vax_init(void)
 {
@@ -125,7 +125,7 @@ int32 i;
 uint32 origin, limit, step = 1;
 
 if (flag)                                               /* dump? */
-    return SCPE_ARG;
+    return sim_messagef (SCPE_NOFNC, "Command Not Implemented\n");
 if (sim_switches & SWMASK ('R')) {                      /* ROM? */
     origin = ROMBASE;
     limit = ROMBASE + ROMSIZE;
