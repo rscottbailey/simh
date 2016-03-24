@@ -2825,6 +2825,8 @@ do {
     stat_nomessage = stat & SCPE_NOMESSAGE;             /* extract possible message supression flag */
     stat_nomessage = stat_nomessage || (!sim_show_message);/* Apply global suppression */
     stat = SCPE_BARE_STATUS(stat);                      /* remove possible flag */
+    if (stat == SCPE_EXPECT)                            /* EXPECT status is non actionable */
+        stat = SCPE_OK;                                 /* so adjust it to SCPE_OK */
     if ((stat != SCPE_OK) ||
         ((cmdp->action != &return_cmd) &&
          (cmdp->action != &goto_cmd) &&
@@ -6670,7 +6672,7 @@ t_value get_rval (REG *rptr, uint32 idx)
 {
 size_t sz;
 t_value val;
-UNIT *uptr;
+uint32 *ptr;
 
 sz = SZ_R (rptr);
 if ((rptr->depth > 1) && (rptr->flags & REG_CIRC)) {
@@ -6678,13 +6680,23 @@ if ((rptr->depth > 1) && (rptr->flags & REG_CIRC)) {
     if (idx >= rptr->depth) idx = idx - rptr->depth;
     }
 if ((rptr->depth > 1) && (rptr->flags & REG_UNIT)) {
-    uptr = ((UNIT *) rptr->loc) + idx;
+    ptr = (uint32 *)(((UNIT *) rptr->loc) + idx);
 #if defined (USE_INT64)
     if (sz <= sizeof (uint32))
-        val = *((uint32 *) uptr);
-    else val = *((t_uint64 *) uptr);
+        val = *ptr;
+    else val = *((t_uint64 *) ptr);
 #else
-    val = *((uint32 *) uptr);
+    val = *ptr;
+#endif
+    }
+else if ((rptr->depth > 1) && (rptr->flags & REG_STRUCT)) {
+    ptr = (uint32 *)(((size_t) rptr->loc) + (idx * rptr->str_size));
+#if defined (USE_INT64)
+    if (sz <= sizeof (uint32))
+        val = *ptr;
+    else val = *((t_uint64 *) ptr);
+#else
+    val = *ptr;
 #endif
     }
 else if (((rptr->depth > 1) || (rptr->flags & REG_FIT)) &&
@@ -6772,7 +6784,7 @@ void put_rval (REG *rptr, uint32 idx, t_value val)
 {
 size_t sz;
 t_value mask;
-UNIT *uptr;
+uint32 *ptr;
 
 #define PUT_RVAL(sz,rp,id,v,m) \
     *(((sz *) rp->loc) + id) = \
@@ -6789,16 +6801,31 @@ if ((rptr->depth > 1) && (rptr->flags & REG_CIRC)) {
         idx = idx - rptr->depth;
     }
 if ((rptr->depth > 1) && (rptr->flags & REG_UNIT)) {
-    uptr = ((UNIT *) rptr->loc) + idx;
+    ptr = (uint32 *)(((UNIT *) rptr->loc) + idx);
 #if defined (USE_INT64)
     if (sz <= sizeof (uint32))
-        *((uint32 *) uptr) = (*((uint32 *) uptr) &
+        *ptr = (*ptr &
         ~(((uint32) mask) << rptr->offset)) |
         (((uint32) val) << rptr->offset);
-    else *((t_uint64 *) uptr) = (*((t_uint64 *) uptr)
+    else *((t_uint64 *) ptr) = (*((t_uint64 *) ptr)
         & ~(mask << rptr->offset)) | (val << rptr->offset);
 #else
-    *((uint32 *) uptr) = (*((uint32 *) uptr) &
+    *ptr = (*ptr &
+        ~(((uint32) mask) << rptr->offset)) |
+        (((uint32) val) << rptr->offset);
+#endif
+    }
+else if ((rptr->depth > 1) && (rptr->flags & REG_STRUCT)) {
+    ptr = (uint32 *)(((size_t) rptr->loc) + (idx * rptr->str_size));
+#if defined (USE_INT64)
+    if (sz <= sizeof (uint32))
+        *((uint32 *) ptr) = (*((uint32 *) ptr) &
+        ~(((uint32) mask) << rptr->offset)) |
+        (((uint32) val) << rptr->offset);
+    else *((t_uint64 *) ptr) = (*((t_uint64 *) ptr)
+        & ~(mask << rptr->offset)) | (val << rptr->offset);
+#else
+    *ptr = (*ptr &
         ~(((uint32) mask) << rptr->offset)) |
         (((uint32) val) << rptr->offset);
 #endif
@@ -7080,7 +7107,7 @@ static readline_func p_readline = NULL;
 typedef void (*add_history_func)(const char *);
 static add_history_func p_add_history = NULL;
 
-if (!initialized) {
+if (prompt && (!initialized)) {
     initialized = 1;
     void *handle;
 

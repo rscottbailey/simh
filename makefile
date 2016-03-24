@@ -66,8 +66,8 @@ ifneq (,$(findstring besm6,$(MAKECMDGOALS)))
   VIDEO_USEFUL = true
   BESM6_BUILD = true
 endif
-# building the pdp11, or any vax simulator could use networking support
-ifneq (,$(or $(findstring pdp11,$(MAKECMDGOALS)),$(findstring vax,$(MAKECMDGOALS)),$(findstring all,$(MAKECMDGOALS))))
+# building the pdp11, pdp10, or any vax simulator could use networking support
+ifneq (,$(or $(findstring pdp11,$(MAKECMDGOALS)),$(findstring pdp10,$(MAKECMDGOALS)),$(findstring vax,$(MAKECMDGOALS)),$(findstring all,$(MAKECMDGOALS))))
   NETWORK_USEFUL = true
   ifneq (,$(findstring all,$(MAKECMDGOALS))$(word 2,$(MAKECMDGOALS)))
     BUILD_MULTIPLE = s
@@ -180,11 +180,11 @@ ifeq ($(WIN32),)  #*nix Environments (&& cygwin)
     GCC_OPTIMIZERS_CMD = $(GCC) -v --help 2>&1
     GCC_WARNINGS_CMD = $(GCC) -v --help 2>&1
     LD_ELF = $(shell echo | $(GCC) -E -dM - | grep __ELF__)
-    INCPATH:=$(shell $(GCC) -x c -v -E /dev/null 2>&1 | grep -A 10 '> search starts here' | grep '^ ' | tr -d '\n')
+    INCPATH:=$(shell LANG=C; $(GCC) -x c -v -E /dev/null 2>&1 | grep -A 10 '> search starts here' | grep '^ ' | tr -d '\n')
     ifeq (Darwin,$(OSTYPE))
       OSNAME = OSX
       LIBEXT = dylib
-      INCPATH:=$(shell $(GCC) -x c -v -E /dev/null 2>&1 | grep -A 10 '> search starts here' | grep '^ ' | grep -v 'framework directory' | tr -d '\n')
+      INCPATH:=$(shell LANG=C; $(GCC) -x c -v -E /dev/null 2>&1 | grep -A 10 '> search starts here' | grep '^ ' | grep -v 'framework directory' | tr -d '\n')
       ifeq (incopt,$(shell if $(TEST) -d /opt/local/include; then echo incopt; fi))
         INCPATH += /opt/local/include
         OS_CCDEFS += -I/opt/local/include
@@ -204,7 +204,7 @@ ifeq ($(WIN32),)  #*nix Environments (&& cygwin)
       else
         ifeq (SunOS,$(OSTYPE))
           OSNAME = Solaris
-          LIBPATH := $(shell crle | grep 'Default Library Path' | awk '{ print $$5 }' | sed 's/:/ /g')
+          LIBPATH := $(shell LANG=C; crle | grep 'Default Library Path' | awk '{ print $$5 }' | sed 's/:/ /g')
           LIBEXT = so
           OS_LDFLAGS += -lsocket -lnsl
           ifeq (incsfw,$(shell if $(TEST) -d /opt/sfw/include; then echo incsfw; fi))
@@ -250,7 +250,7 @@ ifeq ($(WIN32),)  #*nix Environments (&& cygwin)
               else
                 ifeq (,$(findstring NetBSD,$(OSTYPE)))
                   ifneq (no ldconfig,$(findstring no ldconfig,$(shell which ldconfig 2>&1)))
-                    LDSEARCH :=$(shell ldconfig -r | grep 'search directories' | awk '{print $$3}' | sed 's/:/ /g')
+                    LDSEARCH :=$(shell LANG=C; ldconfig -r | grep 'search directories' | awk '{print $$3}' | sed 's/:/ /g')
                   endif
                   ifneq (,$(LDSEARCH))
                     LIBPATH := $(LDSEARCH)
@@ -1067,7 +1067,7 @@ PDP10 = ${PDP10D}/pdp10_fe.c ${PDP11D}/pdp11_dz.c ${PDP10D}/pdp10_cpu.c \
 	${PDP11D}/pdp11_pt.c ${PDP11D}/pdp11_ry.c ${PDP11D}/pdp11_cr.c \
 	${PDP11D}/pdp11_dup.c ${PDP11D}/pdp11_dmc.c ${PDP11D}/pdp11_kmc.c \
 	${PDP11D}/pdp11_xu.c
-PDP10_OPT = -DVM_PDP10 -DUSE_INT64 -I ${PDP10D} -I ${PDP11D}
+PDP10_OPT = -DVM_PDP10 -DUSE_INT64 -I ${PDP10D} -I ${PDP11D} ${NETWORK_OPT}
 
 
 PDP8D = PDP8
@@ -1098,8 +1098,16 @@ HP2100 = ${HP2100D}/hp2100_stddev.c ${HP2100D}/hp2100_dp.c ${HP2100D}/hp2100_dq.
 	${HP2100D}/hp2100_cpu4.c ${HP2100D}/hp2100_cpu5.c ${HP2100D}/hp2100_cpu6.c \
 	${HP2100D}/hp2100_cpu7.c ${HP2100D}/hp2100_fp1.c ${HP2100D}/hp2100_baci.c \
 	${HP2100D}/hp2100_mpx.c ${HP2100D}/hp2100_pif.c ${HP2100D}/hp2100_di.c \
-	${HP2100D}/hp2100_di_da.c ${HP2100D}/hp_disclib.c
+	${HP2100D}/hp2100_di_da.c ${HP2100D}/hp2100_disclib.c
 HP2100_OPT = -DHAVE_INT64 -I ${HP2100D}
+
+HP3000D = HP3000
+HP3000 = ${HP3000D}/hp_disclib.c ${HP3000D}/hp_tapelib.c ${HP3000D}/hp3000_atc.c \
+	${HP3000D}/hp3000_clk.c ${HP3000D}/hp3000_cpu.c ${HP3000D}/hp3000_cpu_base.c \
+	${HP3000D}/hp3000_cpu_fp.c ${HP3000D}/hp3000_ds.c ${HP3000D}/hp3000_iop.c \
+	${HP3000D}/hp3000_mpx.c ${HP3000D}/hp3000_ms.c \
+	${HP3000D}/hp3000_scmb.c ${HP3000D}/hp3000_sel.c ${HP3000D}/hp3000_sys.c
+HP3000_OPT = -I ${HP3000D}
 
 
 I1401D = I1401
@@ -1340,7 +1348,7 @@ PDQ3_OPT = -I ${PDQ3D} -DUSE_SIM_IMD
 #
 ALL = pdp1 pdp4 pdp7 pdp8 pdp9 pdp15 pdp11 pdp10 \
 	vax microvax3900 microvax1 rtvax1000 microvax2 vax730 vax750 vax780 vax8600 \
-	nova eclipse hp2100 i1401 i1620 s3 altair altairz80 gri \
+	nova eclipse hp2100 hp3000 i1401 i1620 s3 altair altairz80 gri \
 	i7094 ibm1130 id16 id32 sds lgp h316 \
 	swtp6800mp-a swtp6800mp-a2 tx-0 ssem isys8010 isys8020 \
 	b5500
@@ -1502,6 +1510,12 @@ hp2100 : ${BIN}hp2100${EXE}
 ${BIN}hp2100${EXE} : ${HP2100} ${SIM}
 	${MKDIRBIN}
 	${CC} ${HP2100} ${SIM} ${HP2100_OPT} $(CC_OUTSPEC) ${LDFLAGS}
+
+hp3000 : ${BIN}hp3000${EXE}
+
+${BIN}hp3000${EXE} : ${HP3000} ${SIM}
+	${MKDIRBIN}
+	${CC} ${HP3000} ${SIM} ${HP3000_OPT} $(CC_OUTSPEC) ${LDFLAGS}
 
 i1401 : ${BIN}i1401${EXE}
 
