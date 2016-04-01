@@ -424,29 +424,29 @@ ifeq ($(WIN32),)  #*nix Environments (&& cygwin)
     endif
     ifneq (,$(call find_include,SDL2/SDL))
       ifneq (,$(call find_lib,SDL2))
-        VIDEO_CCDEFS += -DHAVE_LIBSDL -DUSE_SIM_VIDEO -I$(dir $(call find_include,SDL2/SDL))
-        VIDEO_LDFLAGS += -lSDL2
+        VIDEO_CCDEFS += -DHAVE_LIBSDL -DUSE_SIM_VIDEO `$(realpath $(dir $(call find_include,SDL2/SDL))../../bin/sdl2-config) --cflags`
+        VIDEO_LDFLAGS += `$(realpath $(dir $(call find_include,SDL2/SDL))../../bin/sdl2-config) --libs`
         VIDEO_FEATURES = - video capabilities provided by libSDL2 (Simple Directmedia Layer)
         DISPLAYL = ${DISPLAYD}/display.c $(DISPLAYD)/sim_ws.c
         DISPLAYVT = ${DISPLAYD}/vt11.c
         DISPLAY_OPT += -DUSE_DISPLAY $(VIDEO_CCDEFS) $(VIDEO_LDFLAGS)
-        $(info using libSDL2: $(call find_lib,SDL2) $(call find_include,SDL2/SDL))
+        $(info using libSDL2: $(call find_include,SDL2/SDL))
         ifeq (Darwin,$(OSTYPE))
-          VIDEO_LDFLAGS += -lobjc -framework cocoa -DSDL_MAIN_AVAILABLE
+          VIDEO_CCDEFS += -DSDL_MAIN_AVAILABLE
         endif
       endif
     else
       ifneq (,$(call find_include,SDL/SDL))
         ifneq (,$(call find_lib,SDL))
-          VIDEO_CCDEFS += -DHAVE_LIBSDL -DUSE_SIM_VIDEO -I$(dir $(call find_include,SDL/SDL))
-          VIDEO_LDFLAGS += -lSDL
+          VIDEO_CCDEFS += -DHAVE_LIBSDL -DUSE_SIM_VIDEO `$(realpath $(dir $(call find_include,SDL/SDL))../../bin/sdl-config) --cflags`
+          VIDEO_LDFLAGS += `$(realpath $(dir $(call find_include,SDL/SDL))../../bin/sdl-config) --libs`
           VIDEO_FEATURES = - video capabilities provided by libSDL (Simple Directmedia Layer)
           DISPLAYL = ${DISPLAYD}/display.c $(DISPLAYD)/sim_ws.c
           DISPLAYVT = ${DISPLAYD}/vt11.c
           DISPLAY_OPT += -DUSE_DISPLAY $(VIDEO_CCDEFS) $(VIDEO_LDFLAGS)
-          $(info using libSDL: $(call find_lib,SDL) $(call find_include,SDL/SDL))
+          $(info using libSDL: $(call find_include,SDL/SDL))
           ifeq (Darwin,$(OSTYPE))
-            VIDEO_LDFLAGS += -lobjc -framework cocoa -DSDL_MAIN_AVAILABLE
+            VIDEO_CCDEFS += -DSDL_MAIN_AVAILABLE
           endif
         endif
       endif
@@ -809,6 +809,9 @@ ifneq ($(DEBUG),)
 else
   ifneq (clang,$(findstring clang,$(COMPILER_NAME)))
     CFLAGS_O = -O2
+    ifeq (Darwin,$(OSTYPE))
+      NO_LTO = 1
+    endif
   else
     ifeq (Darwin,$(OSTYPE))
       CFLAGS_O += -O4 -fno-strict-overflow -flto -fwhole-program
@@ -936,7 +939,9 @@ PDP18BD = PDP18B
 PDP18B = ${PDP18BD}/pdp18b_dt.c ${PDP18BD}/pdp18b_drm.c ${PDP18BD}/pdp18b_cpu.c \
 	${PDP18BD}/pdp18b_lp.c ${PDP18BD}/pdp18b_mt.c ${PDP18BD}/pdp18b_rf.c \
 	${PDP18BD}/pdp18b_rp.c ${PDP18BD}/pdp18b_stddev.c ${PDP18BD}/pdp18b_sys.c \
-	${PDP18BD}/pdp18b_rb.c ${PDP18BD}/pdp18b_tt1.c ${PDP18BD}/pdp18b_fpp.c
+	${PDP18BD}/pdp18b_rb.c ${PDP18BD}/pdp18b_tt1.c ${PDP18BD}/pdp18b_fpp.c \
+	${PDP18BD}/pdp18b_g2tty.c
+
 PDP4_OPT = -DPDP4 -I ${PDP18BD}
 PDP7_OPT = -DPDP7 -I ${PDP18BD}
 PDP9_OPT = -DPDP9 -I ${PDP18BD}
@@ -1010,7 +1015,8 @@ VAX730 = ${VAXD}/vax_cpu.c ${VAXD}/vax_cpu1.c ${VAXD}/vax_fpa.c \
 	${PDP11D}/pdp11_dz.c ${PDP11D}/pdp11_lp.c ${PDP11D}/pdp11_tq.c \
 	${PDP11D}/pdp11_xu.c ${PDP11D}/pdp11_ry.c ${PDP11D}/pdp11_cr.c \
 	${PDP11D}/pdp11_hk.c ${PDP11D}/pdp11_vh.c ${PDP11D}/pdp11_dmc.c \
-	${PDP11D}/pdp11_td.c ${PDP11D}/pdp11_dup.c ${PDP11D}/pdp11_io_lib.c
+	${PDP11D}/pdp11_td.c ${PDP11D}/pdp11_tc.c ${PDP11D}/pdp11_rk.c \
+	${PDP11D}/pdp11_io_lib.c
 VAX730_OPT = -DVM_VAX -DVAX_730 -DUSE_INT64 -DUSE_ADDR64 -I VAX -I ${PDP11D} ${NETWORK_OPT}
 
 
@@ -1025,7 +1031,8 @@ VAX750 = ${VAXD}/vax_cpu.c ${VAXD}/vax_cpu1.c ${VAXD}/vax_fpa.c \
 	${PDP11D}/pdp11_xu.c ${PDP11D}/pdp11_ry.c ${PDP11D}/pdp11_cr.c \
 	${PDP11D}/pdp11_hk.c ${PDP11D}/pdp11_rp.c ${PDP11D}/pdp11_tu.c \
 	${PDP11D}/pdp11_vh.c ${PDP11D}/pdp11_dmc.c ${PDP11D}/pdp11_dup.c \
-	${PDP11D}/pdp11_td.c ${PDP11D}/pdp11_io_lib.c
+	${PDP11D}/pdp11_td.c ${PDP11D}/pdp11_tc.c ${PDP11D}/pdp11_rk.c \
+	${PDP11D}/pdp11_io_lib.c
 VAX750_OPT = -DVM_VAX -DVAX_750 -DUSE_INT64 -DUSE_ADDR64 -I VAX -I ${PDP11D} ${NETWORK_OPT}
 
 
@@ -1040,7 +1047,8 @@ VAX780 = ${VAXD}/vax_cpu.c ${VAXD}/vax_cpu1.c ${VAXD}/vax_fpa.c \
 	${PDP11D}/pdp11_xu.c ${PDP11D}/pdp11_ry.c ${PDP11D}/pdp11_cr.c \
 	${PDP11D}/pdp11_rp.c ${PDP11D}/pdp11_tu.c ${PDP11D}/pdp11_hk.c \
 	${PDP11D}/pdp11_vh.c ${PDP11D}/pdp11_dmc.c ${PDP11D}/pdp11_dup.c \
-	${PDP11D}/pdp11_td.c ${PDP11D}/pdp11_io_lib.c
+	${PDP11D}/pdp11_td.c ${PDP11D}/pdp11_tc.c ${PDP11D}/pdp11_rk.c \
+	${PDP11D}/pdp11_io_lib.c
 VAX780_OPT = -DVM_VAX -DVAX_780 -DUSE_INT64 -DUSE_ADDR64 -I VAX -I ${PDP11D} ${NETWORK_OPT}
 
 
@@ -1055,7 +1063,8 @@ VAX8600 = ${VAXD}/vax_cpu.c ${VAXD}/vax_cpu1.c ${VAXD}/vax_fpa.c \
 	${PDP11D}/pdp11_xu.c ${PDP11D}/pdp11_ry.c ${PDP11D}/pdp11_cr.c \
 	${PDP11D}/pdp11_rp.c ${PDP11D}/pdp11_tu.c ${PDP11D}/pdp11_hk.c \
 	${PDP11D}/pdp11_vh.c ${PDP11D}/pdp11_dmc.c ${PDP11D}/pdp11_dup.c \
-	${PDP11D}/pdp11_td.c ${PDP11D}/pdp11_io_lib.c
+	${PDP11D}/pdp11_td.c ${PDP11D}/pdp11_tc.c ${PDP11D}/pdp11_rk.c \
+	${PDP11D}/pdp11_io_lib.c
 VAX8600_OPT = -DVM_VAX -DVAX_860 -DUSE_INT64 -DUSE_ADDR64 -I VAX -I ${PDP11D} ${NETWORK_OPT}
 
 

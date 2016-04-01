@@ -66,6 +66,7 @@
 #define STOP_BOOT       12                              /* reboot (780) */
 #define STOP_UNKNOWN    13                              /* unknown reason */
 #define STOP_UNKABO     14                              /* unknown abort */
+#define STOP_DTOFF      15                              /* DECtape off reel */
 #define ABORT_INTR      -1                              /* interrupt */
 #define ABORT_MCHK      (-SCB_MCHK)                     /* machine check */
 #define ABORT_RESIN     (-SCB_RESIN)                    /* rsvd instruction */
@@ -754,7 +755,7 @@ enum opcodes {
 #define VAX_IDLE_QUAD       0x10
 #define VAX_IDLE_BSDNEW     0x20
 #define VAX_IDLE_SYSV       0x40
-#define VAX_IDLE_ELN        0x80    /* VAXELN */
+#define VAX_IDLE_ELN        0x40    /* VAXELN */
 extern uint32 cpu_idle_mask;                            /* idle mask */
 void cpu_idle (void);
 

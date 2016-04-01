@@ -223,6 +223,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\PDP11\pdp11_rk.c"
+				>
+			</File>
+			<File
 				RelativePath="..\PDP11\pdp11_rl.c"
 				>
 			</File>
@@ -236,6 +240,10 @@
 			</File>
 			<File
 				RelativePath="..\PDP11\pdp11_ry.c"
+				>
+			</File>
+			<File
+				RelativePath="..\PDP11\pdp11_tc.c"
 				>
 			</File>
 			<File
