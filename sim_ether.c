@@ -1392,7 +1392,7 @@ static int pcap_mac_if_win32(const char *AdapterName, unsigned char MACAddress[6
   p_PacketRequest = (int (*)(LPADAPTER  AdapterObject,BOOLEAN Set,PPACKET_OID_DATA  OidData))GetProcAddress(hDll, "PacketRequest");
 #else
   hDll = dlopen("packet.dll", RTLD_NOW);
-  p_PacketOpenAdapter = (LPADAPTER (*)(char *AdapterName))dlsym(hDll, "PacketOpenAdapter");
+  p_PacketOpenAdapter = (LPADAPTER (*)(const char *AdapterName))dlsym(hDll, "PacketOpenAdapter");
   p_PacketCloseAdapter = (void (*)(LPADAPTER lpAdapter))dlsym(hDll, "PacketCloseAdapter");
   p_PacketRequest = (int (*)(LPADAPTER  AdapterObject,BOOLEAN Set,PPACKET_OID_DATA  OidData))dlsym(hDll, "PacketRequest");
 #endif
@@ -1445,28 +1445,6 @@ static int pcap_mac_if_win32(const char *AdapterName, unsigned char MACAddress[6
   dlclose(hDll);
 #endif
   return ReturnValue;
-}
-
-static int _eth_get_system_id (char *buf, size_t buf_size)
-{
-  LONG status;
-  DWORD reglen, regtype;
-  HKEY reghnd;
-
-  memset (buf, 0, buf_size);
-  if ((status = RegOpenKeyExA (HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Cryptography", 0, KEY_QUERY_VALUE|KEY_WOW64_64KEY, &reghnd)) != ERROR_SUCCESS)
-    return -1;
-  reglen = buf_size;
-  if ((status = RegQueryValueExA (reghnd, "MachineGuid", NULL, &regtype, buf, &reglen)) != ERROR_SUCCESS) {
-    RegCloseKey (reghnd);
-    return -1;
-    }
-  RegCloseKey (reghnd );
-  /* make sure value is the right type, bail if not acceptable */
-  if ((regtype != REG_SZ) || (reglen > buf_size))
-    return -1;
-  /* registry value seems OK */
-  return 0;
 }
 
 #endif  /* defined(_WIN32) || defined(__CYGWIN__) */
@@ -1636,7 +1614,31 @@ if (gethostuuid (uuid, &wait))
 uuid_unparse_lower(uuid, buf);
 return 0;
 }
-#elif !defined(_WIN32)
+
+#elif defined(_WIN32)
+static int _eth_get_system_id (char *buf, size_t buf_size)
+{
+  LONG status;
+  DWORD reglen, regtype;
+  HKEY reghnd;
+
+  memset (buf, 0, buf_size);
+  if ((status = RegOpenKeyExA (HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Cryptography", 0, KEY_QUERY_VALUE|KEY_WOW64_64KEY, &reghnd)) != ERROR_SUCCESS)
+    return -1;
+  reglen = buf_size;
+  if ((status = RegQueryValueExA (reghnd, "MachineGuid", NULL, &regtype, buf, &reglen)) != ERROR_SUCCESS) {
+    RegCloseKey (reghnd);
+    return -1;
+    }
+  RegCloseKey (reghnd );
+  /* make sure value is the right type, bail if not acceptable */
+  if ((regtype != REG_SZ) || (reglen > buf_size))
+    return -1;
+  /* registry value seems OK */
+  return 0;
+}
+
+#else
 static int _eth_get_system_id (char *buf, size_t buf_size)
 {
 FILE *f;
@@ -1687,8 +1689,6 @@ _eth_reader(void *arg)
 {
 ETH_DEV* volatile dev = (ETH_DEV*)arg;
 int status = 0;
-int sched_policy;
-struct sched_param sched_priority;
 int sel_ret = 0;
 int do_select = 0;
 SOCKET select_fd = 0;
@@ -1719,9 +1719,7 @@ sim_debug(dev->dbit, dev->dptr, "Reader Thread Starting\n");
 /* Boost Priority for this I/O thread vs the CPU instruction execution 
    thread which, in general, won't be readily yielding the processor 
    when this thread needs to run */
-pthread_getschedparam (pthread_self(), &sched_policy, &sched_priority);
-++sched_priority.sched_priority;
-pthread_setschedparam (pthread_self(), sched_policy, &sched_priority);
+sim_os_set_thread_priority (PRIORITY_ABOVE_NORMAL);
 
 while (dev->handle) {
 #if defined (_WIN32)
@@ -1878,15 +1876,11 @@ _eth_writer(void *arg)
 {
 ETH_DEV* volatile dev = (ETH_DEV*)arg;
 ETH_WRITE_REQUEST *request;
-int sched_policy;
-struct sched_param sched_priority;
 
 /* Boost Priority for this I/O thread vs the CPU instruction execution 
    thread which in general won't be readily yielding the processor when 
    this thread needs to run */
-pthread_getschedparam (pthread_self(), &sched_policy, &sched_priority);
-++sched_priority.sched_priority;
-pthread_setschedparam (pthread_self(), sched_policy, &sched_priority);
+sim_os_set_thread_priority (PRIORITY_ABOVE_NORMAL);
 
 sim_debug(dev->dbit, dev->dptr, "Writer Thread Starting\n");
 
