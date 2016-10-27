@@ -841,7 +841,7 @@ int i;
 uint32 clock_start, clock_last, clock_now;
 
 sim_debug (DBG_TRC, &sim_timer_dev, "sim_timer_init()\n");
-for (i=0; i<SIM_NTIMERS; i++)
+for (i=0; i<SIM_NTIMERS; i++) {
     sim_timer_units[i].action = &sim_timer_tick_svc;
     sim_timer_units[i].flags = UNIT_DIS | UNIT_IDLE;
     }
