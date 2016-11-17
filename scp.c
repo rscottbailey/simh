@@ -228,6 +228,7 @@
 #include <signal.h>
 #include <ctype.h>
 #include <time.h>
+#include <math.h>
 #if defined(_WIN32)
 #include <direct.h>
 #include <io.h>
@@ -327,12 +328,65 @@ pthread_cond_t sim_tmxr_poll_cond  = PTHREAD_COND_INITIALIZER;
 int32 sim_tmxr_poll_count;
 pthread_t sim_asynch_main_threadid;
 UNIT * volatile sim_asynch_queue;
-UNIT * volatile sim_wallclock_queue;
-UNIT * volatile sim_wallclock_entry;
 t_bool sim_asynch_enabled = TRUE;
 int32 sim_asynch_check;
 int32 sim_asynch_latency = 4000;      /* 4 usec interrupt latency */
 int32 sim_asynch_inst_latency = 20;   /* assume 5 mip simulator */
+
+int sim_aio_update_queue (void)
+{
+int migrated = 0;
+
+if (AIO_QUEUE_VAL != QUEUE_LIST_END) {  /* List !Empty */
+    UNIT *q, *uptr;
+    int32 a_event_time;
+    do
+        q = AIO_QUEUE_VAL;
+        while (q != AIO_QUEUE_SET(QUEUE_LIST_END, q));  /* Grab current queue */
+    while (q != QUEUE_LIST_END) {       /* List !Empty */
+        sim_debug (SIM_DBG_AIO_QUEUE, sim_dflt_dev, "Migrating Asynch event for %s after %d instructions\n", sim_uname(q), q->a_event_time);
+        ++migrated;
+        uptr = q;
+        q = q->a_next;
+        uptr->a_next = NULL;        /* hygiene */
+        if (uptr->a_activate_call != &sim_activate_notbefore) {
+            a_event_time = uptr->a_event_time-((sim_asynch_inst_latency+1)/2);
+            if (a_event_time < 0)
+                a_event_time = 0;
+            }
+        else
+            a_event_time = uptr->a_event_time;
+        uptr->a_activate_call (uptr, a_event_time);
+        if (uptr->a_check_completion) {
+            sim_debug (SIM_DBG_AIO_QUEUE, sim_dflt_dev, "Calling Completion Check for asynch event on %s\n", sim_uname(uptr));
+            uptr->a_check_completion (uptr);
+            }
+        }
+    }
+return migrated;
+}
+
+void sim_aio_activate (ACTIVATE_API caller, UNIT *uptr, int32 event_time)
+{
+sim_debug (SIM_DBG_AIO_QUEUE, sim_dflt_dev, "Queueing Asynch event for %s after %d instructions\n", sim_uname(uptr), event_time);
+if (uptr->a_next) {
+    uptr->a_activate_call = sim_activate_abs;
+    }
+else {
+    UNIT *q;
+    uptr->a_event_time = event_time;
+    uptr->a_activate_call = caller;
+    do {
+        q = AIO_QUEUE_VAL;
+        uptr->a_next = q;                               /* Mark as on list */
+        } while (q != AIO_QUEUE_SET(uptr, q));
+    }
+sim_asynch_check = 0;                             /* try to force check */
+if (sim_idle_wait) {
+    sim_debug (TIMER_DBG_IDLE, &sim_timer_dev, "waking due to event on %s after %d instructions\n", sim_uname(uptr), event_time);
+    pthread_cond_signal (&sim_asynch_wake);
+    }
+}
 #else
 t_bool sim_asynch_enabled = FALSE;
 #endif
@@ -991,6 +1045,7 @@ static const char simh_help[] =
       "++++++++                     specified destination {STDOUT,STDERR,DEBUG\n"
       "++++++++                     or filename)\n"
       "+set console NOLOG           disable console logging\n"
+      "+set console SPEED=nn{*fac}  specifies the maximum console port input rate\n"
        /***************** 80 character line width template *************************/
 #define HLP_SET_REMOTE "*Commands SET REMOTE"
       "3Remote\n"
@@ -2440,7 +2495,7 @@ BRKTYPTAB *brkt = dptr->brk_types;
 char gbuf[CBUFSIZE];
 
 if (sim_brk_types == 0) {
-    if (!silent) {
+    if ((dptr != sim_dflt_dev) && (!silent)) {
         fprintf (st, "Breakpoints are not supported in the %s simulator\n", sim_name);
         if (dptr->help)
             dptr->help (st, dptr, NULL, 0, NULL);
@@ -2450,14 +2505,16 @@ if (sim_brk_types == 0) {
 if (brkt == NULL) {
     int i;
 
-    if (sim_brk_types & ~sim_brk_dflt) {
-        fprintf (st, "%s supports the following breakpoint types:\n", sim_dname (dptr));
-        for (i=0; i<26; i++) {
-            if (sim_brk_types & (1<<i))
-                fprintf (st, "  -%c\n", 'A'+i);
+    if (dptr == sim_dflt_dev) {
+        if (sim_brk_types & ~sim_brk_dflt) {
+            fprintf (st, "%s supports the following breakpoint types:\n", sim_dname (dptr));
+            for (i=0; i<26; i++) {
+                if (sim_brk_types & (1<<i))
+                    fprintf (st, "  -%c\n", 'A'+i);
+                }
             }
+        fprintf (st, "The default breakpoint type is: %s\n", put_switches (gbuf, sizeof(gbuf), sim_brk_dflt));
         }
-    fprintf (st, "The default breakpoint type is: %s\n", put_switches (gbuf, sizeof(gbuf), sim_brk_dflt));
     return;
     }
 fprintf (st, "%s supports the following breakpoint types:\n", sim_dname (dptr));
@@ -4615,6 +4672,8 @@ if (sim_clock_queue == QUEUE_LIST_END)
     fprintf (st, "%s event queue empty, time = %.0f, executing %.0f instructios/sec\n",
              sim_name, sim_time, sim_timer_inst_per_sec ());
 else {
+    const char *tim;
+
     fprintf (st, "%s event queue status, time = %.0f, executing %.0f instructions/sec\n",
              sim_name, sim_time, sim_timer_inst_per_sec ());
     accum = 0;
@@ -4628,11 +4687,14 @@ else {
                 if ((dptr = find_dev_from_unit (uptr)) != NULL) {
                     fprintf (st, "  %s", sim_dname (dptr));
                     if (dptr->numunits > 1)
-                        fprintf (st, " at %d%s\n", accum + uptr->time, (uptr->flags & UNIT_IDLE) ? " (Idle capable)" : "");
+                        fprintf (st, " unit %d", (int32) (uptr - dptr->units));
                     }
                 else
                     fprintf (st, "  Unknown");
-        fprintf (st, " at %d\n", accum + uptr->time);
+        tim = sim_fmt_secs((accum + uptr->time)/sim_timer_inst_per_sec ());
+        fprintf (st, " at %d%s%s%s%s\n", accum + uptr->time, 
+                                        (*tim) ? " (" : "", tim, (*tim) ? ")" : "",
+                                        (uptr->flags & UNIT_IDLE) ? " (Idle capable)" : "");
         accum = accum + uptr->time;
         }
     }
@@ -6307,8 +6369,12 @@ else if (flag == RU_BOOT) {                             /* boot */
         return r;
     }
 
-else if (flag != RU_CONT)                               /* must be cont */
-    return SCPE_IERR;
+else 
+    if (flag != RU_CONT)                                /* must be cont */
+        return SCPE_IERR;
+    else                                                /* CONTINUE command */
+        if (*cptr != 0)                                 /* should be end (no arguments allowed) */
+            return sim_messagef (SCPE_2MARG, "CONTINUE command takes no arguments\n");
 
 if (sim_switches & SIM_SW_HIDE)                         /* Setup only for Remote Console Mode */
     return SCPE_OK;
@@ -8654,6 +8720,69 @@ if (sim_deb && (sim_deb != stdout))
     if (fputs (dbuf, sim_deb) == EOF)
         return SCPE_IOERR;
 return SCPE_OK;
+}
+
+const char *sim_fmt_secs (double seconds)
+{
+static char buf[60];
+char frac[16] = "";
+const char *sign = "";
+double val = seconds;
+double days, hours, mins, secs, msecs, usecs;
+
+if (val == 0.0)
+    return "";
+if (val < 0.0) {
+    sign = "-";
+    val = -val;
+    }
+days = floor (val / (24.0*60.0*60.0));
+val -= (days * 24.0*60.0*60.0);
+hours = floor (val / (60.0*60.0));
+val -= (hours * 60.0 * 60.0);
+mins = floor (val / 60.0);
+val -= (mins * 60.0);
+secs = floor (val);
+val -= secs;
+val *= 1000.0;
+msecs = floor (val);
+val -= msecs;
+val *= 1000.0;
+usecs = floor (val+0.5);
+if (usecs == 1000.0) {
+    usecs = 0.0;
+    msecs += 1;
+    }
+if ((msecs > 0.0) || (usecs > 0.0)) {
+    sprintf (frac, ".%03.0f%03.0f", msecs, usecs);
+    while (frac[strlen (frac) - 1] == '0')
+        frac[strlen (frac) - 1] = '\0';
+    if (strlen (frac) == 1)
+        frac[0] = '\0';
+    }
+if (days > 0)
+    sprintf (buf, "%s%.0f %02.0f:%02.0f:%02.0f%s day", sign, days, hours, mins, secs, frac);
+else
+    if (hours > 0)
+        sprintf (buf, "%s%.0f:%02.0f:%02.0f%s hour", sign, hours, mins, secs, frac);
+    else
+        if (mins > 0)
+            sprintf (buf, "%s%.0f:%02.0f%s minute", sign, mins, secs, frac);
+        else
+            if (secs > 0)
+                sprintf (buf, "%s%.0f%s second", sign, secs, frac);
+            else
+                if (msecs > 0) {
+                    if (usecs > 0)
+                        sprintf (buf, "%s%.0f.%s msec", sign, msecs, frac+4);
+                    else
+                        sprintf (buf, "%s%.0f msec", sign, msecs);
+                    }
+                else
+                    sprintf (buf, "%s%.0f usec", sign, usecs);
+if (0 != strncmp ("1 ", buf, 2))
+    strcpy (&buf[strlen (buf)], "s");
+return buf;
 }
 
 /* Event queue package

@@ -193,6 +193,7 @@
                          RLDS_VCK+RLDS_DSE)             /* errors bits */
 
 int32 tti_csr = 0;                                      /* control/status */
+uint32 tti_buftime;                                     /* time input character arrived */
 int32 tti_buf = 0;                                      /* buffer */
 int32 tti_int = 0;                                      /* interrupt */
 int32 tto_csr = 0;                                      /* control/status */
@@ -590,13 +591,16 @@ switch (line) {
 
     case ID_CT:                                         /* console terminal */
         sim_clock_coschedule (uptr, tmxr_poll);         /* continue poll */
-        if ((tti_csr & CSR_DONE) == 0) {                /* prev data taken? */
-            if ((c = sim_poll_kbd ()) < SCPE_KFLAG)     /* no char or error? */
-                return c;
-            if (c & SCPE_BREAK)                         /* break? */
-                tti_buf = 0;
-            else tti_buf = sim_tt_inpcvt (c, TT_GET_MODE (uptr->flags));
-            }
+        if ((tti_csr & CSR_DONE) &&                     /* input still pending and < 500ms? */
+            ((sim_os_msec () - tti_buftime) < 500))
+             return SCPE_OK;
+        if ((c = sim_poll_kbd ()) < SCPE_KFLAG)         /* no char or error? */
+            return c;
+        if (c & SCPE_BREAK)                             /* break? */
+            tti_buf = 0;
+        else
+            tti_buf = sim_tt_inpcvt (c, TT_GET_MODE (uptr->flags));
+        tti_buftime = sim_os_msec ();
         break;
 
     case ID_LC:                                         /* logical console */
@@ -743,6 +747,8 @@ if ((val & TMR_CSR_RUN) == 0) {                         /* clearing run? */
     if (tmr_iccs & TMR_CSR_RUN)                         /* run 1 -> 0? */
         tmr_icr = icr_rd (TRUE);                        /* update itr */
     }
+if (val & CSR_DONE)                                     /* Interrupt Acked? */
+    sim_rtcn_tick_ack (20, TMR_CLK);                    /* Let timers know */
 tmr_iccs = tmr_iccs & ~(val & TMR_CSR_W1C);             /* W1C csr */
 tmr_iccs = (tmr_iccs & ~TMR_CSR_WR) |                   /* new r/w */
     (val & TMR_CSR_WR);
@@ -958,7 +964,7 @@ int32 todr_rd (void)
 TOY *toy = (TOY *)clk_unit.filebuf;
 struct timespec base, now, val;
 
-clock_gettime(CLOCK_REALTIME, &now);                    /* get curr time */
+sim_rtcn_get_time(&now, TMR_CLK);                       /* get curr time */
 base.tv_sec = toy->toy_gmtbase;
 base.tv_nsec = toy->toy_gmtbasemsec * 1000000;
 sim_timespec_diff (&val, &now, &base);
@@ -973,8 +979,7 @@ struct timespec now, val, base;
 /* Save the GMT time when set value was 0 to record the base for future 
    read operations in "battery backed-up" state */
 
-if (-1 == clock_gettime(CLOCK_REALTIME, &now))          /* get curr time */
-    return;                                             /* error? */
+sim_rtcn_get_time(&now, TMR_CLK);                       /* get curr time */
 val.tv_sec = ((uint32)data) / 100;
 val.tv_nsec = (((uint32)data) % 100) * 10000000;
 sim_timespec_diff (&base, &now, &val);                  /* base = now - data */
