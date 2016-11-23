@@ -386,8 +386,8 @@ t_stat sim_rem_con_poll_svc (UNIT *uptr);               /* remote console connec
 t_stat sim_rem_con_data_svc (UNIT *uptr);               /* remote console connection data routine */
 t_stat sim_rem_con_reset (DEVICE *dptr);                /* remote console reset routine */
 UNIT sim_rem_con_unit[2] = {
-    { UDATA (&sim_rem_con_poll_svc, 0, 0)  },           /* remote console connection polling unit */
-    { UDATA (&sim_rem_con_data_svc, 0, 0)  }};          /* console data handling unit */
+    { UDATA (&sim_rem_con_poll_svc, UNIT_IDLE, 0)  },   /* remote console connection polling unit */
+    { UDATA (&sim_rem_con_data_svc, UNIT_IDLE, 0)  }};  /* console data handling unit */
 
 DEBTAB sim_rem_con_debug[] = {
   {"TRC",    DBG_TRC},
@@ -1233,7 +1233,7 @@ if (sim_rem_master_mode) {
     t_stat stat_nomessage;
 
     sim_printf ("Command input starting on Master Remote Console Session\n");
-    stat = sim_run_boot_prep ();
+    stat = sim_run_boot_prep (0);
     sim_rem_master_was_enabled = TRUE;
     while (sim_rem_master_mode) {
         sim_rem_single_mode[0] = FALSE;
