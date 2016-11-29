@@ -1040,7 +1040,7 @@ else
 switch (DK_GET_FMT (uptr)) {                            /* case on format */
     case DKUF_F_STD:                                    /* SIMH format */
         if (NULL == (uptr->fileref = sim_vhd_disk_open (cptr, "rb"))) {
-            if (errno == EINVAL)                        /* VHD but broken */
+            if (errno == EBADF)                        /* VHD but broken */
                 return SCPE_OPENERR;
             open_function = sim_fopen;
             size_function = sim_fsize_ex;
@@ -1394,6 +1394,7 @@ fprintf (st, "                disk)\n");
 fprintf (st, "    -M          Merge a Differencing VHD into its parent VHD disk\n");
 fprintf (st, "    -O          Override consistency checks when attaching differencing disks\n");
 fprintf (st, "                which have unexpected parent disk GUID or timestamps\n\n");
+fprintf (st, "    -U          Fix inconsistencies which are overridden by the -O switch\n");
 fprintf (st, "    -Y          Answer Yes to prompt to overwrite last track (on disk create)\n");
 fprintf (st, "    -N          Answer No to prompt to overwrite last track (on disk create)\n");
 fprintf (st, "Examples:\n");
@@ -2896,7 +2897,10 @@ if ((sDynamic) &&
                          (sim_switches & SWMASK ('O'))))
                          strncpy (szParentVHDPath, CheckPath, ParentVHDPathSize);
                     else {
-                        sim_printf ("Error Invalid Parent VHD '%s' for Differencing VHD: %s\n", CheckPath, szVHDPath);
+                        if (0 != memcmp (sDynamic->ParentUniqueID, sParentFooter.UniqueID, sizeof (sParentFooter.UniqueID)))
+                            sim_printf ("Error Invalid Parent VHD '%s' for Differencing VHD: %s\n", CheckPath, szVHDPath);
+                        else
+                            sim_printf ("Error Parent VHD '%s' has been modified since Differencing VHD: %s was created\n", CheckPath, szVHDPath);
                         Return = EINVAL;                /* File Corrupt/Invalid */
                         }
                     break;
@@ -2906,7 +2910,7 @@ if ((sDynamic) &&
 
                     if (0 == stat (CheckPath, &statb)) {
                         sim_printf ("Parent VHD '%s' corrupt for Differencing VHD: %s\n", CheckPath, szVHDPath);
-                        Return = EINVAL;                /* File Corrupt/Invalid */
+                        Return = EBADF;                /* File Corrupt/Invalid */
                         break;
                         }
                     }
@@ -2914,7 +2918,7 @@ if ((sDynamic) &&
             if (!*szParentVHDPath) {
                 if (Return != EINVAL)                   /* File Not Corrupt? */
                     sim_printf ("Missing Parent VHD for Differencing VHD: %s\n", szVHDPath);
-                Return = EINVAL;
+                Return = EBADF;
                 }
             }
         }
@@ -3005,6 +3009,7 @@ return (char *)(&hVHD->Footer.DriveType[0]);
 static FILE *sim_vhd_disk_open (const char *szVHDPath, const char *DesiredAccess)
     {
     VHDHANDLE hVHD = (VHDHANDLE) calloc (1, sizeof(*hVHD));
+    int NeedUpdate = FALSE;
     int Status;
 
     if (!hVHD)
@@ -3037,9 +3042,22 @@ static FILE *sim_vhd_disk_open (const char *szVHDPath, const char *DesiredAccess
                                0);
         if (Status)
             goto Cleanup_Return;
-        if (ParentModifiedTimeStamp != hVHD->Dynamic.ParentTimeStamp) {
-            Status = EBADF;
-            goto Cleanup_Return;
+        if ((0 != memcmp (hVHD->Dynamic.ParentUniqueID, ParentFooter.UniqueID, sizeof (ParentFooter.UniqueID))) || 
+            (ParentModifiedTimeStamp != hVHD->Dynamic.ParentTimeStamp)) {
+            if (sim_switches & SWMASK ('O')) {                      /* OVERRIDE consistency checks? */
+                if ((sim_switches & SWMASK ('U')) &&                /* FIX (UPDATE) consistency checks AND */
+                    (strchr (DesiredAccess, '+'))) {                /* open for write/update? */
+                    memcpy (hVHD->Dynamic.ParentUniqueID, ParentFooter.UniqueID, sizeof (ParentFooter.UniqueID));
+                    hVHD->Dynamic.ParentTimeStamp = ParentModifiedTimeStamp;
+                    hVHD->Dynamic.Checksum = 0;
+                    hVHD->Dynamic.Checksum = NtoHl (CalculateVhdFooterChecksum (&hVHD->Dynamic, sizeof(hVHD->Dynamic)));
+                    NeedUpdate = TRUE;
+                    }
+                }
+            else {
+                Status = EBADF;
+                goto Cleanup_Return;
+                }
             }
         }
     if (hVHD->Footer.SavedState) {
@@ -3055,6 +3073,18 @@ Cleanup_Return:
     if (Status) {
         sim_vhd_disk_close ((FILE *)hVHD);
         hVHD = NULL;
+        }
+    else {
+        if (NeedUpdate) {                               /* Update Differencing Disk Header? */
+            if (WriteFilePosition(hVHD->File,
+                                  &hVHD->Dynamic,
+                                  sizeof (hVHD->Dynamic),
+                                  NULL,
+                                  NtoHll (hVHD->Footer.DataOffset))) {
+                sim_vhd_disk_close ((FILE *)hVHD);
+                hVHD = NULL;
+                }
+            }
         }
     errno = Status;
     return (FILE *)hVHD;
