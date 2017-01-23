@@ -523,6 +523,7 @@ int32 sim_interval = 0;
 int32 sim_switches = 0;
 FILE *sim_ofile = NULL;
 TMLN *sim_oline = NULL;
+MEMFILE *sim_mfile = NULL;
 SCHTAB *sim_schrptr = FALSE;
 SCHTAB *sim_schaptr = FALSE;
 DEVICE *sim_dfdev = NULL;
@@ -4704,7 +4705,9 @@ t_stat show_queue (FILE *st, DEVICE *dnotused, UNIT *unotused, int32 flag, CONST
 DEVICE *dptr;
 UNIT *uptr;
 int32 accum;
+MEMFILE buf;
 
+memset (&buf, 0, sizeof (buf));
 if (cptr && (*cptr != 0))
     return SCPE_2MARG;
 if (sim_clock_queue == QUEUE_LIST_END)
@@ -4745,6 +4748,7 @@ else {
 sim_show_clock_queues (st, dnotused, unotused, flag, cptr);
 #if defined (SIM_ASYNCH_IO)
 pthread_mutex_lock (&sim_asynch_lock);
+sim_mfile = &buf;
 fprintf (st, "asynchronous pending event queue\n");
 if (sim_asynch_queue == QUEUE_LIST_END)
     fprintf (st, "  Empty\n");
@@ -4762,6 +4766,9 @@ else {
 fprintf (st, "asynch latency: %d nanoseconds\n", sim_asynch_latency);
 fprintf (st, "asynch instruction latency: %d instructions\n", sim_asynch_inst_latency);
 pthread_mutex_unlock (&sim_asynch_lock);
+sim_mfile = NULL;
+fprintf (st, "%*.*s", (int)buf.pos, (int)buf.pos, buf.buf);
+free (buf.buf);
 #endif /* SIM_ASYNCH_IO */
 return SCPE_OK;
 }
@@ -6569,10 +6576,15 @@ printf ("\n");
 if (unechoed_cmdline && (r >= SCPE_BASE) && (r != SCPE_STEP) && (r != SCPE_STOP) && (r != SCPE_EXPECT))
     sim_printf("%s> %s\n", do_position(), unechoed_cmdline);
 fprint_stopped (stdout, r);                         /* print msg */
-if (sim_log && (sim_log != stdout))                 /* log if enabled */
+if ((!sim_oline) && ((sim_log && (sim_log != stdout))))/* log if enabled */
     fprint_stopped (sim_log, r);
-if (sim_deb && (sim_deb != stdout) && (sim_deb != sim_log))/* debug if enabled */
+if (sim_deb && (sim_deb != stdout) && (sim_deb != sim_log)) {/* debug if enabled */
+    TMLN *saved_oline = sim_oline;
+
+    sim_oline = NULL;                               /* avoid potential debug to active socket */
     fprint_stopped (sim_deb, r);
+    sim_oline = saved_oline;                        /* restore original socket */
+    }
 }
 
 /* Common setup for RUN or BOOT */
@@ -8801,19 +8813,25 @@ t_stat sim_print_val (t_value val, uint32 radix,
     uint32 width, uint32 format)
 {
 char dbuf[MAX_WIDTH + 1];
+t_stat stat = SCPE_OK;
 
 if (width > MAX_WIDTH)
     width = MAX_WIDTH;
 sprint_val (dbuf, val, radix, width, format);
 if (fputs (dbuf, stdout) == EOF)
-    return SCPE_IOERR;
-if (sim_log && (sim_log != stdout))
+    stat = SCPE_IOERR;
+if ((!sim_oline) && ((sim_log && (sim_log != stdout))))
     if (fputs (dbuf, sim_log) == EOF)
-        return SCPE_IOERR;
-if (sim_deb && (sim_deb != stdout))
+        stat = SCPE_IOERR;
+if (sim_deb && (sim_deb != stdout)) {
+    TMLN *saved_oline = sim_oline;
+
+    sim_oline = NULL;                               /* avoid potential debug to active socket */
     if (fputs (dbuf, sim_deb) == EOF)
-        return SCPE_IOERR;
-return SCPE_OK;
+        stat = SCPE_IOERR;
+    sim_oline = saved_oline;                        /* restore original socket */
+    }
+return stat;
 }
 
 const char *sim_fmt_secs (double seconds)
@@ -10483,7 +10501,7 @@ if (sim_deb_switches & (SWMASK ('T') | SWMASK ('R') | SWMASK ('A'))) {
         sim_timespec_diff (&time_now, &time_now, &sim_deb_basetime);
     if (sim_deb_switches & SWMASK ('T')) {
         time_t tnow = (time_t)time_now.tv_sec;
-        struct tm *now = gmtime(&tnow);
+        struct tm *now = localtime(&tnow);
 
         sprintf(tim_t, "%02d:%02d:%02d.%03d ", now->tm_hour, now->tm_min, now->tm_sec, (int)(time_now.tv_nsec/1000000));
         }
@@ -10631,8 +10649,8 @@ else
     fprintf (stdout, "%s", buf);
 if ((!sim_oline) && (sim_log && (sim_log != stdout)))
     fprintf (sim_log, "%s", buf);
-if ((!sim_oline) && (sim_deb && (sim_deb != stdout) && (sim_deb != sim_log)))
-    fprintf (sim_deb, "%s", buf);
+if (sim_deb && (sim_deb != stdout) && (sim_deb != sim_log))
+    fwrite (buf, 1, strlen (buf), sim_deb);
 
 if (buf != stackbuf)
     free (buf);
@@ -10686,8 +10704,13 @@ if (sim_do_ocptr[sim_do_depth]) {
     if (!sim_do_echo && !sim_quiet && !inhibit_message)
         sim_printf("%s> %s\n", do_position(), sim_do_ocptr[sim_do_depth]);
     else {
-        if (sim_deb)                        /* Always put context in debug output */
+        if (sim_deb) {                      /* Always put context in debug output */
+            TMLN *saved_oline = sim_oline;
+
+            sim_oline = NULL;               /* avoid potential debug to active socket */
             fprintf (sim_deb, "%s> %s\n", do_position(), sim_do_ocptr[sim_do_depth]);
+            sim_oline = saved_oline;        /* restore original socket */
+            }
         }
     }
 if (sim_is_running && !inhibit_message) {
@@ -10708,8 +10731,14 @@ else {
     }
 if ((!sim_oline) && (sim_log && (sim_log != stdout) && !inhibit_message))
     fprintf (sim_log, "%s", buf);
-if ((!sim_oline) && (sim_deb && (((sim_deb != stdout) && (sim_deb != sim_log)) || inhibit_message)))/* Always display messages in debug output */
+/* Always display messages in debug output */
+if (sim_deb && (((sim_deb != stdout) && (sim_deb != sim_log)) || inhibit_message)) {
+    TMLN *saved_oline = sim_oline;
+
+    sim_oline = NULL;                           /* avoid potential debug to active socket */
     fprintf (sim_deb, "%s", buf);
+    sim_oline = saved_oline;                    /* restore original socket */
+    }
 
 if (buf != stackbuf)
     free (buf);
@@ -10775,10 +10804,10 @@ if (sim_deb && dptr && (dptr->dctrl & dbits)) {
         if ('\n' == buf[i]) {
             if (i >= j) {
                 if ((i != j) || (i == 0)) {
-                    if (debug_unterm)
-                        fprintf (sim_deb, "%.*s\r\n", i-j, &buf[j]);
-                    else                                /* print prefix when required */
-                        fprintf (sim_deb, "%s%.*s\r\n", debug_prefix, i-j, &buf[j]);
+                    if (!debug_unterm)                  /* print prefix when required */
+                        fwrite (debug_prefix, 1, strlen (debug_prefix), sim_deb);
+                    fwrite (&buf[j], 1, i-j, sim_deb);
+                    fwrite ("\r\n", 1, 2, sim_deb);
                     }
                 debug_unterm = 0;
                 }
@@ -10786,10 +10815,9 @@ if (sim_deb && dptr && (dptr->dctrl & dbits)) {
             }
         }
     if (i > j) {
-        if (debug_unterm)
-            fprintf (sim_deb, "%.*s", i-j, &buf[j]);
-        else                                        /* print prefix when required */
-            fprintf (sim_deb, "%s%.*s", debug_prefix, i-j, &buf[j]);
+        if (!debug_unterm)                          /* print prefix when required */
+            fwrite (debug_prefix, 1, strlen (debug_prefix), sim_deb);
+        fwrite (&buf[j], 1, i-j, sim_deb);
         }
 
 /* Set unterminated flag for next time */
@@ -10910,12 +10938,61 @@ int Fprintf (FILE *f, const char* fmt, ...)
 int ret = 0;
 va_list args;
 
-va_start (args, fmt);
-if (sim_oline)
-    tmxr_linemsgvf (sim_oline, fmt, args);
-else
-    ret = vfprintf (f, fmt, args);
-va_end (args);
+if (sim_mfile) {
+    char stackbuf[STACKBUFSIZE];
+    int32 bufsize = sizeof(stackbuf);
+    char *buf = stackbuf;
+    va_list arglist;
+    int32 len;
+
+    buf[bufsize-1] = '\0';
+
+    while (1) {                                         /* format passed string, args */
+        va_start (arglist, fmt);
+#if defined(NO_vsnprintf)
+        len = vsprintf (buf, fmt, arglist);
+#else                                                   /* !defined(NO_vsnprintf) */
+        len = vsnprintf (buf, bufsize-1, fmt, arglist);
+#endif                                                  /* NO_vsnprintf */
+        va_end (arglist);
+
+/* If the formatted result didn't fit into the buffer, then grow the buffer and try again */
+
+        if ((len < 0) || (len >= bufsize-1)) {
+            if (buf != stackbuf)
+                free (buf);
+            bufsize = bufsize * 2;
+            if (bufsize < len + 2)
+                bufsize = len + 2;
+            buf = (char *) malloc (bufsize);
+            if (buf == NULL)                            /* out of memory */
+                return -1;
+            buf[bufsize-1] = '\0';
+            continue;
+            }
+        break;
+        }
+
+/* Store the formatted data */
+
+    if (sim_mfile->pos + len > sim_mfile->size) {
+        sim_mfile->size = sim_mfile->pos + 2 * MAX(bufsize, 512);
+        sim_mfile->buf = (char *)realloc (sim_mfile->buf, sim_mfile->size);
+        }
+    memcpy (sim_mfile->buf + sim_mfile->pos, buf, len);
+    sim_mfile->pos += len;
+
+    if (buf != stackbuf)
+        free (buf);
+    }
+else {
+    va_start (args, fmt);
+    if (sim_oline)
+        tmxr_linemsgvf (sim_oline, fmt, args);
+    else
+        ret = vfprintf (f, fmt, args);
+    va_end (args);
+    }
 return ret;
 }
 
