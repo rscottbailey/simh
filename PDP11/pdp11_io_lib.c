@@ -37,7 +37,6 @@
 #include "sim_tmxr.h"
 #include "sim_ether.h"
 
-extern int32 autcon_enb;
 extern int32 int_vec[IPL_HLVL][32];
 #if !defined(VEC_SET)
 #define VEC_SET 0
@@ -823,7 +822,6 @@ t_stat auto_config (const char *name, int32 nctrl)
 uint32 csr = IOPAGEBASE + AUTO_CSRBASE;
 uint32 vec = AUTO_VECBASE;
 int32 ilvl, ibit, numc;
-extern UNIT cpu_unit;
 AUTO_CON *autp;
 DEVICE *dptr;
 DIB *dibp;

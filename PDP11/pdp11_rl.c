@@ -95,8 +95,6 @@
 
 #else                                                   /* PDP-11 version */
 #include "pdp11_defs.h"
-extern uint32 cpu_opt;
-extern UNIT cpu_unit;
 #endif
 
 /* Constants */
@@ -226,8 +224,6 @@ extern UNIT cpu_unit;
 /* RLBAE */
 
 #define RLBAE_IMP       (0000077)                       /* implemented */
-
-extern int32 int_req[IPL_HLVL];
 
 uint16 *rlxb = NULL;                                    /* xfer buffer */
 int32 rlcs = 0;                                         /* control/status */
@@ -1211,7 +1207,6 @@ static const uint16 boot_rom[] = {
 t_stat rl_boot (int32 unitno, DEVICE *dptr)
 {
 size_t i;
-extern uint16 *M;
 
 for (i = 0; i < BOOT_LEN; i++)
     M[(BOOT_START >> 1) + i] = boot_rom[i];
