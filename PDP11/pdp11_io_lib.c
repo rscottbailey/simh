@@ -581,8 +581,12 @@ AUTO_CON auto_tab[] = {/*c  #v  am vm  fxa   fxv */
         {017300} },                                     /* KE11-A - fx CSR, no VEC */
     { { "KG" },          1,  0,  0, 0, 
         {010700} },                                     /* KG11-A - fx CSR, no VEC */
-    { { "RHA", "RHB", "RHC" },  1,  1,  0, 0, 
-        {016700, 012440, 012040}, {0254, 0224, 0204} }, /* RH11/RH70 - fx CSR, fx VEC */
+    { { "RHA" },         1,  1,  0, 0, 
+        {016700}, {0254} },                             /* RH11/RH70 - fx CSR, fx VEC */
+    { { "RHB" },         1,  1,  0, 0, 
+        {012440}, {0224} },                             /* RH11/RH70 - fx CSR, fx VEC */
+    { { "RHC" },  1,  1,  0, 0, 
+        {012040}, {0204} },                             /* RH11/RH70 - fx CSR, fx VEC */
     { { "CLK" },         1,  1,  0, 0, 
         {017546}, {0100} },                             /* KW11L - fx CSR, fx VEC */
     { { "PCLK" },        1,  1,  0, 0, 
@@ -921,44 +925,9 @@ return SCPE_OK;
         sta     =       status code
 */
 
+#include "sim_disk.h"
+
 t_stat pdp11_bad_block (UNIT *uptr, int32 sec, int32 wds)
 {
-int32 i;
-t_addr da;
-uint16 *buf;
-char *namebuf, *c;
-uint32 packid;
-
-if ((sec < 2) || (wds < 16))
-    return SCPE_ARG;
-if ((uptr->flags & UNIT_ATT) == 0)
-    return SCPE_UNATT;
-if (uptr->flags & UNIT_RO)
-    return SCPE_RO;
-if (!get_yn ("Overwrite last track? [N]", FALSE))
-    return SCPE_OK;
-da = (uptr->capac - (sec * wds)) * sizeof (uint16);
-if (sim_fseek (uptr->fileref, da, SEEK_SET))
-    return SCPE_IOERR;
-if ((buf = (uint16 *) malloc (wds * sizeof (uint16))) == NULL)
-    return SCPE_MEM;
-namebuf = uptr->filename;
-if ((c = strrchr (namebuf, '/')))
-    namebuf = c+1;
-if ((c = strrchr (namebuf, '\\')))
-    namebuf = c+1;
-if ((c = strrchr (namebuf, ']')))
-    namebuf = c+1;
-packid = eth_crc32(0, namebuf, strlen (namebuf));
-buf[0] = (uint16)packid;
-buf[1] = (uint16)(packid >> 16) & 0x7FFF;   /* Make sure MSB is clear */
-buf[2] = buf[3] = 0;
-for (i = 4; i < wds; i++)
-    buf[i] = 0177777u;
-for (i = 0; (i < sec) && (i < 10); i++)
-    sim_fwrite (buf, sizeof (uint16), wds, uptr->fileref);
-free (buf);
-if (ferror (uptr->fileref))
-    return SCPE_IOERR;
-return SCPE_OK;
+return sim_disk_pdp11_bad_block (uptr, sec, wds);
 }
