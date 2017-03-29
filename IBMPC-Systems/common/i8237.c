@@ -375,7 +375,6 @@ DEVICE i8237_dev = {
 
 t_stat i8237_svc(UNIT *uptr)
 {
-    sim_printf("uptr=%08X\n", uptr);
     sim_activate (&i8237_unit[uptr->u6], i8237_unit[uptr->u6].wait);
     return SCPE_OK;
 }
@@ -504,6 +503,7 @@ uint8 i8237_r0x(t_bool io, uint8 data)
             return 0;
         }
     }
+    return 0;
 }
 
 uint8 i8237_r1x(t_bool io, uint8 data)
@@ -534,6 +534,7 @@ uint8 i8237_r1x(t_bool io, uint8 data)
             return 0;
         }
     }
+    return 0;
 }
 
 uint8 i8237_r2x(t_bool io, uint8 data)
@@ -564,6 +565,7 @@ uint8 i8237_r2x(t_bool io, uint8 data)
             return 0;
         }
     }
+    return 0;
 }
 
 uint8 i8237_r3x(t_bool io, uint8 data)
@@ -594,6 +596,7 @@ uint8 i8237_r3x(t_bool io, uint8 data)
             return 0;
         }
     }
+    return 0;
 }
 
 uint8 i8237_r4x(t_bool io, uint8 data)
@@ -624,6 +627,7 @@ uint8 i8237_r4x(t_bool io, uint8 data)
             return 0;
         }
     }
+    return 0;
 }
 
 uint8 i8237_r5x(t_bool io, uint8 data)
@@ -654,6 +658,7 @@ uint8 i8237_r5x(t_bool io, uint8 data)
             return 0;
         }
     }
+    return 0;
 }
 
 uint8 i8237_r6x(t_bool io, uint8 data)
@@ -684,6 +689,7 @@ uint8 i8237_r6x(t_bool io, uint8 data)
             return 0;
         }
     }
+    return 0;
 }
 
 uint8 i8237_r7x(t_bool io, uint8 data)
@@ -714,6 +720,7 @@ uint8 i8237_r7x(t_bool io, uint8 data)
             return 0;
         }
     }
+    return 0;
 }
 
 uint8 i8237_r8x(t_bool io, uint8 data)
@@ -730,6 +737,7 @@ uint8 i8237_r8x(t_bool io, uint8 data)
             return 0;
         }
     }
+    return 0;
 }
 
 uint8 i8237_r9x(t_bool io, uint8 data)
@@ -746,6 +754,7 @@ uint8 i8237_r9x(t_bool io, uint8 data)
             return 0;
         }
     }
+    return 0;
 }
 
 uint8 i8237_rAx(t_bool io, uint8 data)
@@ -787,6 +796,7 @@ uint8 i8237_rAx(t_bool io, uint8 data)
             return 0;
         }
     }
+    return 0;
 }
 
 uint8 i8237_rBx(t_bool io, uint8 data)
@@ -803,6 +813,7 @@ uint8 i8237_rBx(t_bool io, uint8 data)
             return 0;
         }
     }
+    return 0;
 }
 
 uint8 i8237_rCx(t_bool io, uint8 data)
@@ -819,6 +830,7 @@ uint8 i8237_rCx(t_bool io, uint8 data)
             return 0;
         }
     }
+    return 0;
 }
 
 uint8 i8237_rDx(t_bool io, uint8 data)
@@ -835,6 +847,7 @@ uint8 i8237_rDx(t_bool io, uint8 data)
             return 0;
         }
     }
+    return 0;
 }
 
 uint8 i8237_rEx(t_bool io, uint8 data)
@@ -851,6 +864,7 @@ uint8 i8237_rEx(t_bool io, uint8 data)
             return 0;
         }
     }
+    return 0;
 }
 
 uint8 i8237_rFx(t_bool io, uint8 data)
@@ -867,6 +881,7 @@ uint8 i8237_rFx(t_bool io, uint8 data)
             return 0;
         }
     }
+    return 0;
 }
 
 /* end of i8237.c */

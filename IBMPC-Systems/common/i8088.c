@@ -252,10 +252,6 @@ union   {
 #define CX              (C.w)
 #define DX              (D.w)
 
-/* macros for handling IP and SP */
-#define INC_IP1         (++IP & ADDRMASK16) /* increment IP one byte */
-#define INC_IP2         ((IP += 2) & ADDRMASK16) /* increment IP two bytes */
-
 /* storage for the rest of the registers */
 int32 DI;                               /* Source Index Register */
 int32 SI;                               /* Destination Index Register */
@@ -295,7 +291,7 @@ uint32 sysmode = 0;                     /* prefix flags */
 #define SYSMODE_SEGOVR_ES   0x08
 #define SYSMODE_SEGOVR_SS   0x10
 #define SYSMODE_SEGMASK  (SYSMODE_SEG_DS_SS | SYSMODE_SEGOVR_CS |   \
-    SYSMODE_SEGOVR_DS | SYSMODE_SEGOVR_ES | SYSMODE_SEGOVR_SS)
+        SYSMODE_SEGOVR_DS | SYSMODE_SEGOVR_ES | SYSMODE_SEGOVR_SS)
 #define SYSMODE_PREFIX_REPE     0x20
 #define SYSMODE_PREFIX_REPNE    0x40
 
@@ -478,7 +474,7 @@ uint8 xor_3_tab[] = { 0, 1, 1, 0 };
 
 int32 IP;
 
-static const char *opcode[] = {
+static const char *opcode[256] = {
 "ADD\t", "ADD\t", "ADD\t", "ADD\t",                 /* 0x00 */
 "ADD\tAL,", "ADD\tAX,", "PUSH\tES", "POP\tES",
 "OR\t", "OR\t", "OR\t", "OR\t", 
@@ -546,7 +542,7 @@ static const char *opcode[] = {
 };
 
 /*
-0 = 1 byte opcaode
+0 = 1 byte opcode
 1 = DATA8
 2 = DATA16
 3 = IP-INC8
@@ -583,7 +579,7 @@ int32 sim_instr (void)
 {
     extern int32 sim_interval;
     int32 IR, OP, DAR, reason, hi, lo, carry, i, adr;
-    int32 MRR, REG, EA, MOD, RM, DISP, VAL, DATA, OFF, SEG, INC, VAL1;
+    int32 MRR, REG, EA, MOD, RM, DISP, VAL, DATA, OFF, SEG, INC, VAL1, MAR;
 
     IP = saved_PC & ADDRMASK16;         /* load local IP */
     reason = 0;                         /* clear stop reason */
@@ -3156,6 +3152,9 @@ int32 sim_instr (void)
                     case 4:             //IP-INC16
                         sim_printf(" 0%04XH", EA);
                         break;
+                    case 5:             //MAR
+                        sim_printf(" 0%02XH", MAR);
+                        break;
                     default:
                         break;
                 }
@@ -3201,7 +3200,8 @@ int32 fetch_byte(int32 flag)
                 break;
         }
     }
-    IP = INC_IP1;                       /* increment IP */
+    IP++;                           /* increment IP */
+    IP &= ADDRMASK16;
     return val;
 }
 
@@ -3213,7 +3213,8 @@ int32 fetch_word(void)
     val |= get_smbyte(SEG_CS, IP + 1) << 8; /* fetch high byte */
 //    if (i8088_dev.dctrl & DEBUG_asm)
 //        sim_printf("0%04XH", val);
-    IP = INC_IP2;                       /* increment IP */
+    IP += 2;;                           /* increment IP */
+    IP &= ADDRMASK16;
     return val;
 }
 
@@ -3251,7 +3252,7 @@ void i86_intr_raise(uint8 num)
 
 uint32 get_rbyte(uint32 reg)
 {
-    uint32 val;
+    uint32 val = 0;
 
     switch(reg) {
         case 0: val = AL; break;
@@ -3270,7 +3271,7 @@ uint32 get_rbyte(uint32 reg)
 
 uint32 get_rword(uint32 reg)
 {
-    uint32 val;
+    uint32 val = 0;
 
     switch(reg) {
         case 0: val = AX; break;
@@ -3337,7 +3338,7 @@ void set_segreg(uint32 reg)
 
 uint32 get_ea(uint32 mrr)
 {
-    uint32 MOD, REG, RM, DISP, EA;
+    uint32 MOD, REG, RM, DISP, EA = 0;
 
     get_mrr_dec(mrr, &MOD, &REG, &RM);
     switch(MOD) {
@@ -4759,7 +4760,7 @@ t_stat fprint_sym (FILE *of, t_addr addr, t_value *val,
         if (strchr(opcode[inst], ' ') != NULL)
             fprintf (of, ",");
         else fprintf (of, " ");
-        fprintf (of, "%h", val[1]);
+        fprintf (of, "%x", val[1]);
     }
     if (oplen[inst] == 3) {
         adr = val[1] & 0xFF;
@@ -4767,7 +4768,7 @@ t_stat fprint_sym (FILE *of, t_addr addr, t_value *val,
         if (strchr(opcode[inst], ' ') != NULL)
             fprintf (of, ",");
         else fprintf (of, " ");
-        fprintf (of, "%h", adr);
+        fprintf (of, "%x", adr);
     }
     return -(oplen[inst] - 1);
 }
@@ -4786,7 +4787,7 @@ t_stat fprint_sym (FILE *of, t_addr addr, t_value *val,
 
 t_stat parse_sym (const char *cptr, t_addr addr, UNIT *uptr, t_value *val, int32 sw)
 {
-    int32 cflag, i = 0, j, r;
+    int32 cflag, i = 0, j, r, fflag = 1;
     char gbuf[CBUFSIZE];
 
     cflag = (uptr == NULL) || (uptr == &i8088_unit);
@@ -4847,9 +4848,9 @@ t_stat parse_sym (const char *cptr, t_addr addr, UNIT *uptr, t_value *val, int32
 /* find opcode in table */
     for (j = 0; j < 256; j++) {
         if (strcmp(gbuf, opcode[j]) == 0)
-            break;
+            fflag = 0;
     }
-    if (j > 255)                                            /* not found */
+    if (fflag)                                              /* not found */
         return SCPE_ARG;
 
     val[0] = j;                                             /* store opcode */
