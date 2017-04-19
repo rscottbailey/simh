@@ -1029,16 +1029,24 @@ static const char simh_help[] =
       "2Displaying Files\n"
 #define HLP_TYPE         "*Commands Displaying_Files TYPE"
       "3TYPE\n"
-      "++TYPE {file}               display a file contents\n"
+      "++TYPE file                 display a file contents\n"
 #define HLP_CAT          "*Commands Displaying_Files CAT"
       "3CAT\n"
-      "++CAT {file}                display a file contents\n"
+      "++CAT file                  display a file contents\n"
+      "2Removing Files\n"
 #define HLP_DELETE       "*Commands Removing_Files DEL"
       "3DELETE\n"
-      "++DEL{ete} {file}           deletes a file\n"
+      "++DEL{ete} file             deletes a file\n"
 #define HLP_RM          "*Commands Removing_Files RM"
       "3RM\n"
-      "++RM {file}                 deletes a file\n"
+      "++RM file                   deletes a file\n"
+      "2Copying Files\n"
+#define HLP_COPY        "*Commands Copying_Files COPY"
+      "3COPY\n"
+      "++COPY sfile dfile          copies a file\n"
+#define HLP_CP          "*Commands Copying_Files CP"
+      "3CP\n"
+      "++CP sfile dfile            copies a file\n"
 #define HLP_SET         "*Commands SET"
       "2SET\n"
        /***************** 80 character line width template *************************/
@@ -1839,6 +1847,8 @@ static CTAB cmd_table[] = {
     { "CAT",        &type_cmd,      0,          HLP_CAT },
     { "DELETE",     &delete_cmd,    0,          HLP_DELETE },
     { "RM",         &delete_cmd,    0,          HLP_RM },
+    { "COPY",       &copy_cmd,      0,          HLP_COPY },
+    { "CP",         &copy_cmd,      0,          HLP_CP },
     { "SET",        &set_cmd,       0,          HLP_SET },
     { "SHOW",       &show_cmd,      0,          HLP_SHOW },
     { "DO",         &do_cmd,        1,          HLP_DO },
@@ -5340,6 +5350,62 @@ stat = sim_dir_scan (cptr, sim_delete_entry, &del_state);
 if (stat == SCPE_OK)
     return del_state.stat;
 return sim_messagef (SCPE_ARG, "No such file or directory: %s\n", cptr);
+}
+
+typedef struct {
+    t_stat stat;
+    int count;
+    char destname[CBUFSIZE];
+    } COPY_CTX;
+
+static void sim_copy_entry (const char *directory, 
+                            const char *filename,
+                            t_offset FileSize,
+                            const struct stat *filestat,
+                            void *context)
+{
+COPY_CTX *ctx = (COPY_CTX *)context;
+struct stat deststat;
+char FullPath[PATH_MAX + 1];
+char dname[CBUFSIZE];\
+t_stat st;
+
+sim_strlcpy (dname, ctx->destname, sizeof (dname));
+
+sprintf (FullPath, "%s%s", directory, filename);
+
+if ((dname[strlen (dname) - 1] == '/') || (dname[strlen (dname) - 1] == '\\'))
+    dname[strlen (dname) - 1] = '\0';
+if ((!stat (dname, &deststat)) && (deststat.st_mode & S_IFDIR)) {
+    const char *dslash = (strrchr (dname, '/') ? "/" : (strrchr (dname, '\\') ? "\\" : "/"));
+
+    dname[sizeof (dname) - 1] = '\0';
+    snprintf (&dname[strlen (dname)], sizeof (dname) - strlen (dname), "%s%s", dslash, filename);
+    }
+st = sim_copyfile (FullPath, dname, TRUE);
+if (SCPE_OK == st)
+    ++ctx->count;
+else
+    ctx->stat = st;
+}
+
+t_stat copy_cmd (int32 flg, CONST char *cptr)
+{
+char sname[CBUFSIZE];
+COPY_CTX copy_state;
+t_stat stat;
+
+memset (&copy_state, 0, sizeof (copy_state));
+if ((!cptr) || (*cptr == 0))
+    return SCPE_2FARG;
+cptr = get_glyph_quoted (cptr, sname, 0);
+if ((!cptr) || (*cptr == 0))
+    return SCPE_2FARG;
+cptr = get_glyph_quoted (cptr, copy_state.destname, 0);
+stat = sim_dir_scan (sname, sim_copy_entry, &copy_state);
+if ((stat == SCPE_OK) && (copy_state.count))
+    return sim_messagef (SCPE_OK, "      %3d file(s) copied\n", copy_state.count);
+return copy_state.stat;
 }
 
 /* Breakpoint commands */
@@ -10976,7 +11042,8 @@ while (1) {                                         /* format passed string, arg
     break;
     }
 
-if (sim_do_ocptr[sim_do_depth]) {
+if ((sim_do_ocptr[sim_do_depth]) &&
+    ((stat & ~SCPE_NOMESSAGE) != SCPE_OK)) {
     if (!sim_do_echo && !sim_quiet && !inhibit_message)
         sim_printf("%s> %s\n", do_position(), sim_do_ocptr[sim_do_depth]);
     else {
