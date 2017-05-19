@@ -1602,6 +1602,8 @@ else {
                 sim_throt_val = (uint32) (val * (1 + (sim_idle_rate_ms / val2)));
                 }
             }
+        sim_throt_state = SIM_THROT_STATE_THROTTLE;         /* force state */
+        sim_throt_wait = sim_throt_val;
         }
     }
 sim_register_internal_device (&sim_throttle_dev);       /* Register Throttle Device */
@@ -1635,7 +1637,8 @@ else {
         break;
 
     case SIM_THROT_SPC:
-        fprintf (st, "Throttle:                      sleep %d ms every %d cycles\n", sim_throt_sleep_time, sim_throt_val);
+        fprintf (st, "Throttle:                      %d/%d\n", sim_throt_val, sim_throt_sleep_time);
+        fprintf (st, "Throttling by sleeping for:    %d ms every %d cycles\n", sim_throt_sleep_time, sim_throt_val);
         break;
 
     default:
@@ -1684,7 +1687,7 @@ if (sim_throt_type == SIM_THROT_SPC) {                  /* Non dynamic? */
 switch (sim_throt_state) {
 
     case SIM_THROT_STATE_INIT:                          /* take initial reading */
-        sim_idle_ms_sleep (sim_idle_rate_ms);           /* start on a tick boundart to calibrate */
+        sim_idle_ms_sleep (sim_idle_rate_ms);           /* start on a tick boundary to calibrate */
         sim_throt_ms_start = sim_os_msec ();
         sim_throt_inst_start = sim_gtime();
         sim_throt_wait = SIM_THROT_WST;
