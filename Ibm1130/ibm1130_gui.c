@@ -33,6 +33,7 @@
 
 #include "ibm1130_defs.h"
 #include "ibm1130res.h"
+#include "sim_tmxr.h"
 
 #define UPDATE_BY_TIMER
 
@@ -95,6 +96,10 @@ DEVICE console_dev = {
 
 extern UNIT cr_unit;                                    /* pointers to 1442 and 1132 (1403) printers */
 extern UNIT prt_unit;
+
+extern UNIT dsk_unit[];
+extern int boot_drive;
+extern t_bool program_is_loaded;
 
 #ifndef GUI_SUPPORT
     void update_gui (int force)               {}        /* stubs for non-GUI builds */
@@ -433,6 +438,20 @@ void update_gui (BOOL force)
     if (V)
         CND |= 1;
 
+    if ((boot_drive<0) || (!program_is_loaded)) {
+        boot_drive = CES & 7;
+        if (boot_drive > 4)
+            boot_drive = -1;
+    }
+    if ((boot_drive>=0) && (dsk_unit[boot_drive].flags&UNIT_ATT)) {
+        disk_ready(TRUE);
+        disk_unlocked(FALSE);
+    }
+    else {
+        disk_ready(FALSE);
+        disk_unlocked(TRUE);
+    }
+
     int_lamps |= int_req;
     if (ipl >= 0)
         int_lamps |= (0x20 >> ipl);
@@ -565,7 +584,7 @@ LRESULT CALLBACK ButtonProc (HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     int i;
 
-    i = GetWindowLong(hWnd, GWL_ID);
+    i = GetWindowLongPtr(hWnd, GWLP_ID);
 
     if (! btn[i].pushable) {
         if (uMsg == WM_LBUTTONDOWN || uMsg == WM_LBUTTONUP || uMsg == WM_LBUTTONDBLCLK)
@@ -699,7 +718,7 @@ void PaintButton (LPDRAWITEMSTRUCT dis)
 /* ------------------------------------------------------------------------ 
  * ------------------------------------------------------------------------ */
 
-HWND CreateSubclassedButton (HWND hwParent, int i)
+HWND CreateSubclassedButton (HWND hwParent, UINT_PTR i)
 {
     HWND hBtn;
     int x, y;
@@ -715,7 +734,7 @@ HWND CreateSubclassedButton (HWND hwParent, int i)
     btn[i].hBtn = hBtn;
 
     if (oldButtonProc == NULL)
-        oldButtonProc = (WNDPROC) GetWindowLong(hBtn, GWL_WNDPROC);
+        oldButtonProc = (WNDPROC) GetWindowLongPtr(hBtn, GWLP_WNDPROC);
 
     btn[i].hbrLit = CreateSolidBrush(btn[i].clr);
 
@@ -728,7 +747,7 @@ HWND CreateSubclassedButton (HWND hwParent, int i)
         EnableWindow(hBtn, FALSE);
     }
 
-    SetWindowLong(hBtn, GWL_WNDPROC, (LONG) ButtonProc);
+    SetWindowLongPtr(hBtn, GWLP_WNDPROC, (UINT_PTR) ButtonProc);
     return hBtn;
 }
 
@@ -741,7 +760,8 @@ HWND CreateSubclassedButton (HWND hwParent, int i)
 static DWORD WINAPI Pump (LPVOID arg)
 {
     MSG msg;
-    int wx, wy, i;
+    int wx, wy;
+    UINT_PTR i;
     RECT r, ra;
     BITMAP bm;
     WNDCLASS cd;
@@ -1155,7 +1175,6 @@ void HandleCommand (HWND hWnd, WORD wNotify, WORD idCtl, HWND hwCtl)
     switch (idCtl) {
         case IDC_POWER:                     /* toggle system power */
             power = ! power;
-            reset_all(0);
             if (running && ! power) {       /* turning off */
                 reason = STOP_POWER_OFF;
                 /* wait for execution thread to exit */
@@ -1165,6 +1184,7 @@ void HandleCommand (HWND hWnd, WORD wNotify, WORD idCtl, HWND hwCtl)
  *                  Sleep(10);
  */             
             }
+            stuff_and_wait("reset", 0, 500);
 
             btn[IDC_POWER_ON].state = power;
             EnableWindow(btn[IDC_POWER_ON].hBtn, power);
@@ -1172,7 +1192,12 @@ void HandleCommand (HWND hWnd, WORD wNotify, WORD idCtl, HWND hwCtl)
             for (i = 0; i < NBUTTONS; i++)  /* repaint all of the lamps */
                 if (! btn[i].pushable)
                     InvalidateRect(btn[i].hBtn, NULL, TRUE);
-
+            if ((cr_unit.flags & UNIT_ATT) && 
+                (btn[IDC_1442].state!=STATE_1442_FULL)) {
+                stuff_and_wait("detach cr", 0, 500);
+                update_gui(TRUE);
+            }
+            program_is_loaded = FALSE;
             break;
 
         case IDC_PROGRAM_START:             /* begin execution */
@@ -1233,17 +1258,37 @@ void HandleCommand (HWND hWnd, WORD wNotify, WORD idCtl, HWND hwCtl)
 
         case IDC_RESET:
             if (! running) {                /* check-reset is disabled while running */
-                reset_all(0);
+                stuff_and_wait("reset", 0, 500);
                 forms_check(0);             /* clear forms-check status */
                 print_check(0);
             }
+            if ((cr_unit.flags & UNIT_ATT) && 
+                (btn[IDC_1442].state!=STATE_1442_FULL)) {
+                stuff_and_wait("detach cr", 0, 500);
+                update_gui(TRUE);
+            }
+            program_is_loaded = FALSE;
             break;
 
         case IDC_PROGRAM_LOAD:
             if (! running) {                /* if card reader is attached to a file, do cold start read of one card */
                 IAR = 0;                    /* reset IAR */
 #ifdef PROGRAM_LOAD_STARTS_CPU
-                stuff_cmd("boot cr");
+                if (cr_unit.flags & UNIT_ATT)
+                    stuff_cmd("boot cr");
+                else {
+                    if (((CES & 7) <= 4) &&
+                        (dsk_unit[(CES & 7)].flags&UNIT_ATT))
+                        boot_drive = CES & 7;
+                    else
+                        boot_drive = -1;
+                    if (boot_drive >= 0) {
+                        char cmd[50];
+
+                        sprintf(cmd, "boot dsk%d", boot_drive);
+                        stuff_cmd(cmd);
+                    }
+                }
 #else
                 if (cr_boot(0, NULL) != SCPE_OK)    /* load boot card */
                     remark_cmd("IPL failed");
@@ -1338,7 +1383,7 @@ LRESULT CALLBACK ConsoleWndProc (HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPa
             break;
 
         case WM_CTLCOLORBTN:
-            i = GetWindowLong((HWND) lParam, GWL_ID);
+            i = GetWindowLongPtr((HWND) lParam, GWLP_ID);
             if (BETWEEN(i, 0, NBUTTONS-1))
                 return (LRESULT) (power && IsWindowEnabled((HWND) lParam) ? btn[i].hbrLit : btn[i].hbrDark);
 
@@ -1407,9 +1452,13 @@ void print_check (int set)
 
 void keyboard_selected (int select)
 {
-    btn[IDC_KEYBOARD_SELECT].state = select;
+    extern TMLN sim_con_ldsc;
+    extern TMXR sim_con_tmxr;
 
-    if (select)
+    btn[IDC_KEYBOARD_SELECT].state = select;
+    if (select &&                                           /* selected */
+        (sim_con_tmxr.master != 0) &&                       /* not Telnet? */
+        (sim_con_ldsc.serport != 0))                       /* and not serial? */
         SetForegroundWindow(hConsoleWindow);
     if (btn[IDC_KEYBOARD_SELECT].hBtn != NULL)
         EnableWindow(btn[IDC_KEYBOARD_SELECT].hBtn, select);
@@ -1676,6 +1725,7 @@ char *read_cmdline (char *ptr, int size, FILE *stream)
         if ((hCmdThread = CreateThread(NULL, 0, CmdThread, NULL, 0, &iCmdThreadID)) == NULL)
             scp_panic("Unable to create command line reading thread");
         atexit(read_atexit);
+        Sleep(500);                                         /* Let GUI threads startup and start to process messages */
     }
 
     update_gui(TRUE);
