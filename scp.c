@@ -2459,7 +2459,7 @@ if (dptr->flags & DEV_DISABLE) {
     sprintf (buf, "set %s DISABLE", sim_dname (dptr));
     fprintf (st,  "%-30s\tDisables device %s\n", buf, sim_dname (dptr));
     }
-if (dptr->flags & DEV_DEBUG) {
+if ((dptr->flags & DEV_DEBUG) || (dptr->debflags)) {
     fprint_header (st, &found, header);
     sprintf (buf, "set %s DEBUG", sim_dname (dptr));
     fprintf (st,  "%-30s\tEnables debugging for device %s\n", buf, sim_dname (dptr));
@@ -2537,7 +2537,7 @@ if (dptr->modifiers) {
         fprintf (st, "%-30s\t%s\n", buf, mptr->help ? mptr->help : "");
         }
     }
-if (dptr->flags & DEV_DEBUG) {
+if ((dptr->flags & DEV_DEBUG) || (dptr->debflags)) {
     fprint_header (st, &found, header);
     sprintf (buf, "show %s DEBUG", sim_dname (dptr));
     fprintf (st, "%-30s\tDisplays debugging status for device %s\n", buf, sim_dname (dptr));
@@ -4904,7 +4904,7 @@ t_stat show_dev_debug (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, CONST cha
 int32 any = 0;
 DEBTAB *dep;
 
-if (dptr->flags & DEV_DEBUG) {
+if ((dptr->flags & DEV_DEBUG) || (dptr->debflags)) {
     if (dptr->dctrl == 0)
         fputs ("Debugging disabled", st);
     else if (dptr->debflags == NULL)
@@ -7094,7 +7094,7 @@ for (gptr = gbuf, reason = SCPE_OK;
             return SCPE_ARG;
         reason = exdep_reg_loop (ofile, sim_schrptr, flag, cptr,
             lowr, highr, (uint32) low, (uint32) high);
-        if ((!sim_oline) && (sim_log && (ofile == stdout)))
+        if ((flag & EX_E) && (!sim_oline) && (sim_log && (ofile == stdout)))
             exdep_reg_loop (sim_log, sim_schrptr, EX_E, cptr,
                 lowr, highr, (uint32) low, (uint32) high);
         continue;
@@ -7109,7 +7109,7 @@ for (gptr = gbuf, reason = SCPE_OK;
         return SCPE_ARG;
     reason = exdep_addr_loop (ofile, sim_schaptr, flag, cptr, low, high,
         sim_dfdev, sim_dfunit);
-    if ((!sim_oline) && (sim_log && (ofile == stdout)))
+    if ((flag & EX_E) && (!sim_oline) && (sim_log && (ofile == stdout)))
         exdep_addr_loop (sim_log, sim_schaptr, EX_E, cptr, low, high,
             sim_dfdev, sim_dfunit);
     }                                                   /* end for */
@@ -10876,7 +10876,7 @@ int32 offset = 0;
 if (dptr->debflags == 0)
     return debtab_none;
 
-dbits &= dptr->dctrl;                           /* Look for just the bits tha matched */
+dbits &= dptr->dctrl;                           /* Look for just the bits that matched */
 
 /* Find matching words for bitmask */
 

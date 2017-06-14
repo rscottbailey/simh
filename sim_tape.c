@@ -322,9 +322,18 @@ sim_debug (ctx->dbit, ctx->dptr, "_tape_completion_dispatch(unit=%d, top=%d, cal
 if (ctx->io_top != TOP_DONE)
     abort();                                            /* horribly wrong, stop */
 
-if (ctx->callback && ctx->io_top == TOP_DONE) {
+if (ctx->asynch_io)
+    pthread_mutex_lock (&ctx->io_lock);
+
+if (ctx->callback) {
     ctx->callback = NULL;
+    if (ctx->asynch_io)
+        pthread_mutex_unlock (&ctx->io_lock);
     callback (uptr, ctx->io_status);
+    }
+else {
+    if (ctx->asynch_io)
+        pthread_mutex_unlock (&ctx->io_lock);
     }
 }
 
@@ -448,7 +457,7 @@ DEVICE *dptr;
 
 if ((dptr = find_dev_from_unit (uptr)) == NULL)
     return SCPE_NOATT;
-return sim_tape_attach_ex (uptr, cptr, (dptr->flags & DEV_DEBUG) ? 0xFFFFFFFF : 0, 0);
+return sim_tape_attach_ex (uptr, cptr, ((dptr->flags & DEV_DEBUG) || (dptr->debflags)) ? 0xFFFFFFFF : 0, 0);
 }
 
 t_stat sim_tape_attach_ex (UNIT *uptr, const char *cptr, uint32 dbit, int completion_delay)

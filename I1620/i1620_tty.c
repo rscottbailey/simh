@@ -47,8 +47,8 @@
 #define TTO_COLMAX      80
 #define UF_V_1DIG       (UNIT_V_UF)
 #define UF_1DIG         (1 << UF_V_1DIG)
-#define UTTI            0
-#define UTTO            1
+#define UTTI            1
+#define UTTO            0
 
 uint32 tti_unlock = 0;                                  /* expecting input */
 uint32 tti_flag = 0;                                    /* flag typed */
@@ -80,6 +80,7 @@ t_stat tti_svc (UNIT *uptr);
 t_stat tto_svc (UNIT *uptr);
 t_stat tty_reset (DEVICE *dptr);
 t_stat tty_set_fixtabs (UNIT *uptr, int32 val, CONST char *cptr, void *desc);
+t_stat tty_set_12digit (UNIT *uptr, int32 val, CONST char *cptr, void *desc);
 
 /* TTY data structures
 
@@ -89,8 +90,8 @@ t_stat tty_set_fixtabs (UNIT *uptr, int32 val, CONST char *cptr, void *desc);
 */
 
 UNIT tty_unit[] = {
-    { UDATA (&tti_svc, 0, 0), KBD_POLL_WAIT },
-    { UDATA (&tto_svc, 0, 0), SERIAL_OUT_WAIT }
+    { UDATA (&tto_svc, 0, 0), DEFIO_CPS },
+    { UDATA (&tti_svc, 0, 0), KBD_POLL_WAIT }
     };
 
 REG tty_reg[] = {
@@ -98,7 +99,7 @@ REG tty_reg[] = {
     { FLDATA (FLAG, tti_flag, 0), REG_HRO },
     { DRDATA (COL, tto_col, 7) },
     { DRDATA (KTIME, tty_unit[UTTI].wait, 24), REG_NZ + PV_LEFT },
-    { DRDATA (TTIME, tty_unit[UTTO].wait, 24), REG_NZ + PV_LEFT },
+    { DRDATA (CPS, tty_unit[UTTO].wait, 24), REG_NZ + PV_LEFT },
     { NULL }
     };
 
@@ -111,8 +112,8 @@ MTAB tty_mod[] = {
       &tty_set_fixtabs, NULL, NULL },
     { MTAB_XTD|MTAB_VDV, 8, NULL, "DEFAULTTABS",
       &tty_set_fixtabs, NULL, NULL },
-    { UF_1DIG, UF_1DIG, "combined digits and flags", "1DIGIT", NULL },
-    { UF_1DIG, 0      , "separate digits and flags", "2DIGIT", NULL },
+    { UF_1DIG, UF_1DIG, "combined digits and flags", "1DIGIT", &tty_set_12digit },
+    { UF_1DIG, 0      , "separate digits and flags", "2DIGIT", &tty_set_12digit },
     { 0 }
     };
 
@@ -355,7 +356,8 @@ else {                                                  /* RA */
         PAR = ADDR_A (PAR, -2);                         /* decr mem addr*/
         return SCPE_OK;
         }
-    else if (tti_to_alp[raw] < 0) {                     /* illegal char? */
+    else if ((raw >= sizeof(tti_to_alp)) ||             /* illegal char? */
+             (tti_to_alp[raw] < 0)) {
         tto_write ('\a');                               /* beep! */
         return SCPE_OK;
         }
@@ -387,7 +389,7 @@ if ((cpuio_opc != OP_DN) && (cpuio_cnt >= MEMSIZE)) {   /* wrap, ~dump? */
     cpuio_clr_inp (uptr);                               /* done */
     return STOP_RWRAP;
     }
-sim_activate (uptr, uptr->wait);                        /* sched another xfer */
+sim_activate_after (uptr, 1000000/uptr->wait);          /* sched another xfer */
 
 switch (cpuio_opc) {                                    /* decode op */
 
@@ -514,5 +516,14 @@ for (i = 0; i < TTO_COLMAX; i++) {
         tto_tabs[i] = 1;
     else tto_tabs[i] = 0;
     }
+return SCPE_OK;
+}
+
+/* Assure consistency of 1DIG/2DIG setting */
+
+t_stat tty_set_12digit (UNIT *uptr, int32 val, CONST char *cptr, void *desc)
+{
+tty_unit[UTTI].flags = (tty_unit[UTTI].flags & ~UF_1DIG) | val;
+tty_unit[UTTO].flags = (tty_unit[UTTO].flags & ~UF_1DIG) | val;
 return SCPE_OK;
 }
