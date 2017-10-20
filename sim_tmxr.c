@@ -2448,7 +2448,7 @@ while (*tptr) {
             if (0 == MATCH_CMD (gbuf, "LOG")) {
                 if ((NULL == cptr) || ('\0' == *cptr))
                     return sim_messagef (SCPE_2FARG, "Missing Log Specifier\n");
-                strncpy(logfiletmpl, cptr, sizeof(logfiletmpl)-1);
+                strlcpy(logfiletmpl, cptr, sizeof(logfiletmpl));
                 continue;
                 }
              if (0 == MATCH_CMD (gbuf, "LOOPBACK")) {
@@ -2514,14 +2514,14 @@ while (*tptr) {
             if (0 == MATCH_CMD (gbuf, "CONNECT")) {
                 if ((NULL == cptr) || ('\0' == *cptr))
                     return sim_messagef (SCPE_2FARG, "Missing Connect Specifier\n");
-                strncpy (destination, cptr, sizeof(destination)-1);
+                strlcpy (destination, cptr, sizeof(destination));
                 continue;
                 }
             if (0 == MATCH_CMD (gbuf, "SPEED")) {
                 if ((NULL == cptr) || ('\0' == *cptr) || 
                     (_tmln_speed_delta (cptr) < 0))
                     return sim_messagef (SCPE_ARG, "Invalid Speed Specifier: %s\n", (cptr ? cptr : ""));
-                strncpy (speed, cptr, sizeof(speed)-1);
+                strlcpy (speed, cptr, sizeof(speed));
                 continue;
                 }
             cptr = get_glyph (gbuf, port, ';');
@@ -2572,7 +2572,7 @@ while (*tptr) {
             char *eptr;
 
             memset (hostport, '\0', sizeof(hostport));
-            strncpy (hostport, destination, sizeof(hostport)-1);
+            strlcpy (hostport, destination, sizeof(hostport));
             if ((eptr = strchr (hostport, ';')))
                 *(eptr++) = '\0';
             if (eptr) {
@@ -2599,16 +2599,17 @@ while (*tptr) {
         if (modem_control != mp->modem_control)
             return SCPE_ARG;
         if (logfiletmpl[0]) {
-            strncpy(mp->logfiletmpl, logfiletmpl, sizeof(mp->logfiletmpl)-1);
+            strlcpy(mp->logfiletmpl, logfiletmpl, sizeof(mp->logfiletmpl));
             for (i = 0; i < mp->lines; i++) {
                 lp = mp->ldsc + i;
                 sim_close_logfile (&lp->txlogref);
                 lp->txlog = NULL;
                 lp->txlogname = (char *)realloc(lp->txlogname, CBUFSIZE);
+                lp->txlogname[CBUFSIZE-1] = '\0';
                 if (mp->lines > 1)
-                    sprintf(lp->txlogname, "%s_%d", mp->logfiletmpl, i);
+                    snprintf(lp->txlogname, CBUFSIZE-1, "%s_%d", mp->logfiletmpl, i);
                 else
-                    strcpy (lp->txlogname, mp->logfiletmpl);
+                    strlcpy (lp->txlogname, mp->logfiletmpl, CBUFSIZE);
                 r = sim_open_logfile (lp->txlogname, TRUE, &lp->txlog, &lp->txlogref);
                 if (r != SCPE_OK) {
                     free (lp->txlogname);
@@ -3542,8 +3543,7 @@ if (!found) {
     tmxr_open_devices = (TMXR **)realloc(tmxr_open_devices, (tmxr_open_device_count+1)*sizeof(*tmxr_open_devices));
     tmxr_open_devices[tmxr_open_device_count++] = mux;
     for (i=0; i<mux->lines; i++)
-        if (0 == mux->ldsc[i].send.delay)
-            mux->ldsc[i].send.delay = SEND_DEFAULT_DELAY;
+        mux->ldsc[i].send.after = mux->ldsc[i].send.delay = 0;
     }
 #if defined(SIM_ASYNCH_MUX)
 pthread_mutex_unlock (&sim_tmxr_poll_lock);
@@ -3610,6 +3610,41 @@ return _tmxr_locate_line_send_expect (cptr, snd, NULL);
 t_stat tmxr_locate_line_expect (const char *cptr, EXPECT **exp)
 {
 return _tmxr_locate_line_send_expect (cptr, NULL, exp);
+}
+
+static const char *_tmxr_send_expect_line_name (const SEND *snd, const EXPECT *exp)
+{
+static char line_name[CBUFSIZE];
+int i, j;
+
+strcpy (line_name, "");
+for (i=0; i<tmxr_open_device_count; ++i)
+    for (j=0; j<tmxr_open_devices[i]->lines; ++j)
+        if ((snd == &tmxr_open_devices[i]->ldsc[j].send) ||
+            (exp == &tmxr_open_devices[i]->ldsc[j].expect)) {
+            if (tmxr_open_devices[i]->lines > 1)
+                snprintf (line_name, sizeof (line_name), "%s:%d", tmxr_open_devices[i]->ldsc[j].send.dptr->name, j);
+            else
+                strlcpy (line_name, tmxr_open_devices[i]->ldsc[j].send.dptr->name, sizeof (line_name));
+            break;
+            }
+return line_name;
+}
+
+const char *tmxr_send_line_name (const SEND *snd)
+{
+if (snd == sim_cons_get_send ())
+    return "CONSOLE";
+else
+    return _tmxr_send_expect_line_name (snd, NULL);
+}
+
+const char *tmxr_expect_line_name (const EXPECT *exp)
+{
+if (exp == sim_cons_get_expect ())
+    return "CONSOLE";
+else
+    return _tmxr_send_expect_line_name (NULL, exp);
 }
 
 t_stat tmxr_change_async (void)
@@ -4443,7 +4478,7 @@ if (lp->txlog)                                          /* close existing log */
 lp->txlogname = (char *) calloc (CBUFSIZE, sizeof (char)); /* alloc namebuf */
 if (lp->txlogname == NULL)                              /* can't? */
     return SCPE_MEM;
-strncpy (lp->txlogname, cptr, CBUFSIZE);                /* save file name */
+strlcpy (lp->txlogname, cptr, CBUFSIZE);                /* save file name */
 sim_open_logfile (cptr, TRUE, &lp->txlog, &lp->txlogref);/* open log */
 if (lp->txlog == NULL) {                                /* error? */
     free (lp->txlogname);                               /* free buffer */
