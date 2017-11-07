@@ -543,11 +543,20 @@ else
 
 psave = lp->txbpi;                                      /* save insertion pointer */
 lp->txbpi = lp->txbpr;                                  /* insert connection message */
+if ((lp->serport) && (!sim_is_running)) {
+    sim_os_ms_sleep (TMXR_DTR_DROP_TIME);               /* Wait for DTR to be noticed */
+    lp->ser_connect_pending = FALSE;                    /* Mark line as ready for action */
+    lp->conn = TRUE;
+    }
 tmxr_linemsg (lp, msgbuf);                              /* beginning of buffer */
 lp->txbpi = psave;                                      /* restore insertion pointer */
 
 unwritten = tmxr_send_buffered_data (lp);               /* send the message */
 
+if ((lp->serport) && (!sim_is_running)) {
+    lp->ser_connect_pending = TRUE;                     /* Mark line as not yet ready for action */
+    lp->conn = FALSE;
+    }
 if (unwritten == 0)                                     /* buffer now empty? */
     lp->xmte = 1;                                       /* reenable transmission if paused */
 
@@ -697,11 +706,11 @@ if (lp->loopback)
     return loop_write (lp, &(lp->txb[i]), length);
 
 if (lp->serport) {                                      /* serial port connection? */
-    if (sim_gtime () < lp->txnexttime)
+    if ((sim_gtime () < lp->txnexttime) && (sim_is_running))
         return 0;
     written = sim_write_serial (lp->serport, &(lp->txb[i]), length);
-    if (written > 0)
-        lp->txnexttime = floor (sim_gtime () + (lp->txdelta * sim_timer_inst_per_sec ()));
+    if ((written > 0) && (sim_is_running))
+        lp->txnexttime = floor (sim_gtime () + (written * lp->txdelta * sim_timer_inst_per_sec ()));
     return written;
     }
 else {                                                  /* Telnet connection */
@@ -2394,7 +2403,6 @@ CONST char *tptr = cptr;
 t_bool nolog, notelnet, listennotelnet, modem_control, loopback, datagram, packet;
 TMLN *lp;
 t_stat r = SCPE_OK;
-t_bool not_quiet = (!sim_quiet) && (0 == (sim_switches & SWMASK ('Q')));
 
 if (*tptr == '\0')
     return SCPE_ARG;
@@ -2660,8 +2668,7 @@ while (*tptr) {
                 free (mp->port);
                 mp->port = NULL;
                 }
-            if (not_quiet)
-                sim_printf ("Listening on port %s\n", listen);
+            sim_messagef (SCPE_OK, "Listening on port %s\n", listen);
             mp->port = (char *)realloc (mp->port, 1 + strlen (listen));
             strcpy (mp->port, listen);                      /* save port */
             mp->master = sock;                              /* save master socket */
@@ -2694,8 +2701,7 @@ while (*tptr) {
         if (loopback) {
             if (mp->lines > 1)
                 return sim_messagef (SCPE_ARG, "Ambiguous Loopback specification\n");
-            if (not_quiet)
-                sim_printf ("Operating in loopback mode\n");
+            sim_messagef (SCPE_OK, "Operating in loopback mode\n");
             for (i = 0; i < mp->lines; i++) {
                 lp = mp->ldsc + i;
                 tmxr_set_line_loopback (lp, loopback);
@@ -2726,10 +2732,8 @@ while (*tptr) {
                 if (!lp->mp->modem_control)                 /* raise DTR and RTS for non modem control lines */
                     sim_control_serial (lp->serport, TMXR_MDM_DTR|TMXR_MDM_RTS, 0, NULL);
                 lp->cnms = sim_os_msec ();                  /* record time of connection */
-                if (sim_switches & SWMASK ('V')) {          /* -V flag reports connection on port */
-                    sim_os_ms_sleep (TMXR_DTR_DROP_TIME);
+                if (sim_switches & SWMASK ('V'))            /* -V flag reports connection on port */
                     tmxr_report_connection (mp, lp);        /* report the connection to the line */
-                    }
                 }
             else {
                 lp->datagram = datagram;
@@ -2813,8 +2817,7 @@ while (*tptr) {
             if (sock == INVALID_SOCKET)                     /* open error */
                 return sim_messagef (SCPE_OPENERR, "Can't listen on port: %s\n", listen);
             _mux_detach_line (lp, TRUE, FALSE);
-            if (not_quiet)
-                sim_printf ("Line %d Listening on port %s\n", line, listen);
+            sim_messagef (SCPE_OK, "Line %d Listening on port %s\n", line, listen);
             lp->port = (char *)realloc (lp->port, 1 + strlen (listen));
             strcpy (lp->port, listen);                       /* save port */
             lp->master = sock;                              /* save master socket */
@@ -2836,10 +2839,8 @@ while (*tptr) {
                 if (!lp->mp->modem_control)                 /* raise DTR and RTS for non modem control lines */
                     sim_control_serial (lp->serport, TMXR_MDM_DTR|TMXR_MDM_RTS, 0, NULL);
                 lp->cnms = sim_os_msec ();                  /* record time of connection */
-                if (sim_switches & SWMASK ('V')) {          /* -V flag reports connection on port */
-                    sim_os_ms_sleep (TMXR_DTR_DROP_TIME);
+                if (sim_switches & SWMASK ('V'))            /* -V flag reports connection on port */
                     tmxr_report_connection (mp, lp);        /* report the connection to the line */
-                    }
                 }
             else {
                 lp->datagram = datagram;
@@ -2872,8 +2873,7 @@ while (*tptr) {
             }
         if (loopback) {
             tmxr_set_line_loopback (lp, loopback);
-            if (not_quiet)
-                sim_printf ("Line %d operating in loopback mode\n", line);
+            sim_messagef (SCPE_OK, "Line %d operating in loopback mode\n", line);
             }
         lp->modem_control = modem_control;
         if (speed[0] && (!datagram) && (!lp->serport))
@@ -3666,6 +3666,9 @@ t_stat tmxr_attach_ex (TMXR *mp, UNIT *uptr, CONST char *cptr, t_bool async)
 t_stat r;
 int32 i;
 
+if (mp->dptr == NULL)                                   /* has device been set? */
+    mp->dptr = find_dev_from_unit (uptr);               /* no, so set device now */
+
 r = tmxr_open_master (mp, cptr);                        /* open master socket */
 if (r != SCPE_OK)                                       /* error? */
     return r;
@@ -3685,9 +3688,6 @@ if (!async || (uptr->flags & TMUF_NOASYNCH))            /* if asynch disabled */
 #else
 uptr->dynflags |= TMUF_NOASYNCH;                        /* tag as no asynch */
 #endif
-
-if (mp->dptr == NULL)                                   /* has device been set? */
-    mp->dptr = find_dev_from_unit (uptr);               /* no, so set device now */
 
 if (mp->dptr) {
     for (i=0; i<mp->lines; i++) {
@@ -4454,7 +4454,9 @@ if (lp == NULL)                                                 /* bad line numb
 if ((lp->sock) || (lp->serport)) {                              /* connection active? */
     if (!lp->notelnet)
         tmxr_linemsg (lp, "\r\nOperator disconnected line\r\n\n");/* report closure */
-    tmxr_reset_ln_ex (lp, (sim_switches & SWMASK ('C')));       /* drop the line */
+    if (lp->serport && (sim_switches & SWMASK ('C')))
+        return tmxr_detach_ln (lp);
+    return tmxr_reset_ln_ex (lp, FALSE);                        /* drop the line */
     }
 
 return SCPE_OK;
