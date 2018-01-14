@@ -41,6 +41,13 @@
 #define CMD_MISC_SHIFT  4                 /* Command */
 #define CMD_MISC_MASK   0x7
 
+#define IU_SPEED_REGS   2                 /* Two speed select registers, */
+#define IU_SPEEDS       16                /* with 16 speeds each */
+
+#define PARITY_ODD      0
+#define PARITY_EVEN     1
+#define PARITY_NONE     2
+
 #define STS_RXR         0x01              /* Receiver ready */
 #define STS_FFL         0x02              /* FIFO full */
 #define STS_TXR         0x04              /* Transmitter ready */
@@ -113,6 +120,16 @@
 #define UM_MASK       0x70
 #define UM_SHIFT      4
 
+/* IMR bits */
+#define IMR_TXRA      0x01
+#define IMR_RXRA      0x02
+#define IMR_CTR       0x08
+#define IMR_TXRB      0x10
+#define IMR_RXRB      0x20
+
+/* Power-off bit */
+#define IU_KILLPWR    0x04
+
 #define PORT_A            0
 #define PORT_B            1
 
@@ -147,6 +164,12 @@ extern DEVICE iu_timer_dev;
 
 #define IU_DCDA           0x01
 #define IU_DCDB           0x02
+#define IU_DTRA           0x01
+#define IU_DTRB           0x02
+
+/* Default baud rate generator (9600 baud) */
+#define BRG_DEFAULT       11
+
 
 typedef struct iu_port {
     uint8 stat;               /* Port Status */
@@ -186,7 +209,7 @@ t_stat contty_reset(DEVICE *dptr);
 t_stat iu_timer_reset(DEVICE *dptr);
 t_stat iu_svc_tti(UNIT *uptr);
 t_stat iu_svc_tto(UNIT *uptr);
-t_stat iu_svc_contty(UNIT *uptr);
+t_stat iu_svc_contty_rcv(UNIT *uptr);
 t_stat iu_svc_contty_xmt(UNIT *uptr);
 t_stat iu_svc_timer(UNIT *uptr);
 uint32 iu_read(uint32 pa, size_t size);
