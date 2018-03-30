@@ -474,18 +474,13 @@ typedef enum {
     SW_NUMBER           /* Numeric Value */
     } SWITCH_PARSE;
 SWITCH_PARSE get_switches (const char *cptr, int32 *sw_val, int32 *sw_number);
-t_stat get_aval (t_addr addr, DEVICE *dptr, UNIT *uptr);
-t_value get_rval (REG *rptr, uint32 idx);
 void put_rval (REG *rptr, uint32 idx, t_value val);
 void fprint_help (FILE *st);
 void fprint_stopped (FILE *st, t_stat r);
 void fprint_capac (FILE *st, DEVICE *dptr, UNIT *uptr);
 void fprint_sep (FILE *st, int32 *tokens);
-char *read_line (char *ptr, int32 size, FILE *stream);
-char *read_line_p (const char *prompt, char *ptr, int32 size, FILE *stream);
 REG *find_reg_glob (CONST char *ptr, CONST char **optr, DEVICE **gdptr);
 REG *find_reg_glob_reason (CONST char *cptr, CONST char **optr, DEVICE **gdptr, t_stat *stat);
-char *sim_trim_endspc (char *cptr);
 
 /* Forward references */
 
@@ -5215,6 +5210,10 @@ if (flag) {
 #define S_xstr(a) S_str(a)
 #define S_str(a) #a
 fprintf (st, "%sgit commit id: %8.8s", flag ? "\n        " : "        ", S_xstr(SIM_GIT_COMMIT_ID));
+#if defined(SIM_GIT_COMMIT_TIME)
+if (flag)
+    fprintf (st, "%sgit commit time: %s", "\n        ", S_xstr(SIM_GIT_COMMIT_TIME));
+#endif
 #undef S_str
 #undef S_xstr
 #endif
@@ -5680,7 +5679,7 @@ if (dir) {
 #endif
     t_offset FileSize;
     char FileName[PATH_MAX + 1];
-    char *MatchName = 1 + strrchr (cptr, '/');;
+    const char *MatchName = 1 + strrchr (cptr, '/');;
     char *p_name;
     struct tm *local;
 #if defined (HAVE_GLOB)
@@ -6281,8 +6280,9 @@ if ((sim_switches & SWMASK ('R')) ||                    /* read only? */
     uptr->fileref = sim_fopen (cptr, "rb");             /* open rd only */
     if (uptr->fileref == NULL)                          /* open fail? */
         return attach_err (uptr, SCPE_OPENERR);         /* yes, error */
+    if (!(uptr->flags & UNIT_RO))
+        sim_messagef (SCPE_OK, "%s: unit is read only\n", sim_dname (dptr));
     uptr->flags = uptr->flags | UNIT_RO;                /* set rd only */
-    sim_messagef (SCPE_OK, "%s: unit is read only\n", sim_dname (dptr));
     }
 else {
     if (sim_switches & SWMASK ('N')) {                  /* new file only? */
@@ -6452,7 +6452,7 @@ if ((uptr->flags & UNIT_BUF) && (uptr->filebuf)) {
         }
     uptr->flags = uptr->flags & ~UNIT_BUF;
     }
-uptr->flags = uptr->flags & ~(UNIT_ATT | UNIT_RO);
+uptr->flags = uptr->flags & ~(UNIT_ATT | ((uptr->flags & UNIT_ROABLE) ? UNIT_RO : 0));
 free (uptr->filename);
 uptr->filename = NULL;
 if (fclose (uptr->fileref) == EOF)

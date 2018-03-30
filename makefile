@@ -195,7 +195,11 @@ ifeq ($(WIN32),)  #*nix Environments (&& cygwin)
     endif
   endif
   ifeq (git-repo,$(shell if $(TEST) -d ./.git; then echo git-repo; fi))
-    ifeq (need-hooks,$(shell if $(TEST) ! -e ./.git/hooks/post-checkout; then echo need-hooks; fi))
+    NEED_HOOKS = $(shell if $(TEST) ! -e ./.git/hooks/post-checkout; then echo need-hooks; fi)
+    ifeq (,$(NEED_HOOKS))
+      NEED_HOOKS = $(shell if ! `diff ./.git/hooks/post-checkout ./Visual\ Studio\ Projects/git-hooks/post-checkout >/dev/null`; then echo need-hooks; fi)
+    endif
+    ifeq (need-hooks,$(NEED_HOOKS))
       $(info *** Installing git hooks in local repository ***)
       GIT_HOOKS += $(shell /bin/cp './Visual Studio Projects/git-hooks/post-commit' ./.git/hooks/)
       GIT_HOOKS += $(shell /bin/cp './Visual Studio Projects/git-hooks/post-checkout' ./.git/hooks/)
@@ -203,9 +207,14 @@ ifeq ($(WIN32),)  #*nix Environments (&& cygwin)
       GIT_HOOKS += $(shell ./.git/hooks/post-checkout)
       ifneq (,$(strip $(GIT_HOOKS)))
         $(info *** Warning - Error installing git hooks *** $(GIT_HOOKS))
+      else
+        ifneq (commit-id-exists,$(shell if $(TEST) -e .git-commit-id; then echo commit-id-exists; fi))
+          $(shell /bin/rm .git-commit-id)
+        endif
       endif
-    else
-      ifneq (commit-id-exists,$(shell if $(TEST) -e .git-commit-id; then echo commit-id-exists; fi))
+    endif
+    ifneq (commit-id-exists,$(shell if $(TEST) -e .git-commit-id; then echo commit-id-exists; fi))
+      ifeq (,$(strip $(GIT_HOOKS)))
         GIT_HOOKS = $(shell ./.git/hooks/post-checkout)
         ifneq (,$(strip $(GIT_HOOKS)))
           $(info *** Warning - Error executing git hooks *** $(GIT_HOOKS))
@@ -828,15 +837,19 @@ ifeq ($(WIN32),)  #*nix Environments (&& cygwin)
     MKDIRBIN = mkdir -p BIN
   endif
   ifeq (commit-id-exists,$(shell if $(TEST) -e .git-commit-id; then echo commit-id-exists; fi))
-    GIT_COMMIT_ID=$(shell cat .git-commit-id)
+    GIT_COMMIT_ID=$(shell grep 'SIM_GIT_COMMIT_ID' .git-commit-id | awk '{ print $$2 }')
+    GIT_COMMIT_TIME=$(shell grep 'SIM_GIT_COMMIT_TIME' .git-commit-id | awk '{ print $$2 }')
   else
     ifeq (,$(shell grep 'define SIM_GIT_COMMIT_ID' sim_rev.h | grep 'Format:'))
       GIT_COMMIT_ID=$(shell grep 'define SIM_GIT_COMMIT_ID' sim_rev.h | awk '{ print $$3 }')
+      GIT_COMMIT_TIME=$(shell grep 'define SIM_GIT_COMMIT_TIME' sim_rev.h | awk '{ print $$3 }')
     else
       ifeq (git-submodule,$(if $(shell cd .. ; git rev-parse --git-dir 2>/dev/null),git-submodule))
         GIT_COMMIT_ID=$(shell cd .. ; git submodule status | grep "$(notdir $(realpath .))" | awk '{ print $$1 }')
+        GIT_COMMIT_TIME=$(shell git --git-dir=$(realpath .)/.git log $(GIT_COMMIT_ID) -1 --pretty="%aI")
       else
         GIT_COMMIT_ID=undetermined-git-id
+        GIT_COMMIT_TIME=undetermined-commit-time
       endif
     endif
   endif
@@ -921,11 +934,13 @@ else
   ifneq ($(USE_NETWORK),)
     NETWORK_OPT += -DUSE_SHARED
   endif
-  ifneq (,$(shell if exist .git-commit-id type .git-commit-id))
-    GIT_COMMIT_ID=$(shell if exist .git-commit-id type .git-commit-id)
+  ifneq (,$(shell if exist .git-commit-id echo git-commit-id))
+    GIT_COMMIT_ID=$(shell for /F "tokens=2" %%i in ("$(shell findstr /C:"SIM_GIT_COMMIT_ID" .git-commit-id)") do echo %%i)
+    GIT_COMMIT_TIME=$(shell for /F "tokens=2" %%i in ("$(shell findstr /C:"SIM_GIT_COMMIT_TIME" .git-commit-id)") do echo %%i)
   else
     ifeq (,$(shell findstr /C:"define SIM_GIT_COMMIT_ID" sim_rev.h | findstr Format))
       GIT_COMMIT_ID=$(shell for /F "tokens=3" %%i in ("$(shell findstr /C:"define SIM_GIT_COMMIT_ID" sim_rev.h)") do echo %%i)
+      GIT_COMMIT_TIME=$(shell for /F "tokens=3" %%i in ("$(shell findstr /C:"define SIM_GIT_COMMIT_TIME" sim_rev.h)") do echo %%i)
     endif
   endif
   ifneq (windows-build,$(shell if exist ..\windows-build\README.md echo windows-build))
@@ -978,7 +993,10 @@ else
   endif
 endif # Win32 (via MinGW)
 ifneq (,$(GIT_COMMIT_ID))
-  CFLAGS_GIT = -DSIM_GIT_COMMIT_ID=$(GIT_COMMIT_ID)
+  CFLAGS_GIT = -DSIM_GIT_COMMIT_ID=$(GIT_COMMIT_ID) -DSIM_GIT_COMMIT_TIME=$(GIT_COMMIT_TIME)
+endif
+ifneq (,$(GIT_COMMIT_TIME))
+  CFLAGS_GIT += -DSIM_GIT_COMMIT_TIME=$(GIT_COMMIT_TIME)
 endif
 ifneq (,$(UNSUPPORTED_BUILD))
   CFLAGS_GIT += -DSIM_BUILD=Unsupported=$(UNSUPPORTED_BUILD)
@@ -1063,6 +1081,7 @@ ifneq (clean,$(MAKECMDGOALS))
   ifneq (,$(GIT_COMMIT_ID))
     $(info ***)
     $(info *** git commit id is $(GIT_COMMIT_ID).)
+    $(info *** git commit time is $(GIT_COMMIT_TIME).)
   endif
   $(info ***)
 endif
@@ -1369,6 +1388,12 @@ I7094 = ${I7094D}/i7094_cpu.c ${I7094D}/i7094_cpu1.c ${I7094D}/i7094_io.c \
 I7094_OPT = -DUSE_INT64 -I ${I7094D}
 
 
+I650D = I650
+I650 = ${I650D}/i650_cpu.c ${I650D}/i650_cdr.c ${I650D}/i650_cdp.c \
+	${I650D}/i650_sys.c
+I650_OPT = -I ${I650D} -DUSE_INT64 -DUSE_SIM_CARD
+
+
 IBM1130D = Ibm1130
 IBM1130 = ${IBM1130D}/ibm1130_cpu.c ${IBM1130D}/ibm1130_cr.c \
 	${IBM1130D}/ibm1130_disk.c ${IBM1130D}/ibm1130_stddev.c \
@@ -1596,6 +1621,31 @@ ifneq (,$(BESM6_BUILD))
     ifeq (,$(and ${VIDEO_LDFLAGS}, ${FONTFILE}, $(BESM6_BUILD)))
         $(info *** No SDL ttf support available.  BESM-6 video panel disabled.)
         $(info ***)
+        ifeq (Darwin,$(OSTYPE))
+          $(info *** Info *** Install the MacPorts libSDL2-ttf development package to provide this)
+          $(info *** Info *** functionality for your OS X system:)
+          $(info *** Info ***       # port install libsdl2-ttf-dev)
+          ifeq (/usr/local/bin/brew,$(shell which brew))
+            $(info *** Info ***)
+            $(info *** Info *** OR)
+            $(info *** Info ***)
+            $(info *** Info *** Install the HomeBrew sdl2_ttf package to provide this)
+            $(info *** Info *** functionality for your OS X system:)
+            $(info *** Info ***       $$ brew install sdl2_ttf)
+          endif
+        else
+          ifneq (,$(and $(findstring Linux,$(OSTYPE)),$(call find_exe,apt-get)))
+            $(info *** Info *** Install the development components of libSDL-ttf or libSDL2-ttf)
+            $(info *** Info *** packaged for your Linux operating system distribution:)
+            $(info *** Info ***        $$ sudo apt-get install libsdl2-ttf-dev)
+            $(info *** Info ***    or)
+            $(info *** Info ***        $$ sudo apt-get install libsdl-ttf-dev)
+          else
+            $(info *** Info *** Install the development components of libSDL-ttf packaged by your)
+            $(info *** Info *** operating system distribution and rebuild your simulator to)
+            $(info *** Info *** enable this extra functionality.)
+          endif
+        endif
         BESM6_OPT = -I ${BESM6D} -DUSE_INT64 
     else ifneq (,$(and $(findstring sdl2,${VIDEO_LDFLAGS}),$(call find_include,SDL2/SDL_ttf),$(call find_lib,SDL2_ttf)))
         $(info using libSDL2_ttf: $(call find_lib,SDL2_ttf) $(call find_include,SDL2/SDL_ttf))
@@ -1673,7 +1723,8 @@ ALL = pdp1 pdp4 pdp7 pdp8 pdp9 pdp15 pdp11 pdp10 \
 	nova eclipse hp2100 hp3000 i1401 i1620 s3 altair altairz80 gri \
 	i7094 ibm1130 id16 id32 sds lgp h316 cdc1700 \
 	swtp6800mp-a swtp6800mp-a2 tx-0 ssem b5500 isys8010 isys8020 \
-	isys8030 isys8024 imds-225 scelbi 3b2 i701 i704 i7010 i7070 i7080 i7090
+	isys8030 isys8024 imds-225 scelbi 3b2 i701 i704 i7010 i7070 i7080 i7090 \
+	i650
 
 all : ${ALL}
 
@@ -2092,6 +2143,12 @@ i701 : $(BIN)i701$(EXE)
 ${BIN}i701${EXE} : ${I701} ${SIM} 
 	${MKDIRBIN}
 	${CC} ${I701} ${SIM} ${I701_OPT} $(CC_OUTSPEC) ${LDFLAGS}
+
+i650 : $(BIN)i650$(EXE)
+
+${BIN}i650${EXE} : ${I650} ${SIM} 
+	${MKDIRBIN}
+	${CC} ${I650} ${SIM} ${I650_OPT} $(CC_OUTSPEC) ${LDFLAGS}
 
 # Front Panel API Demo/Test program
 
