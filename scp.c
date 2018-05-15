@@ -5321,7 +5321,15 @@ if (flag) {
 #else
     cpp = "C";
 #endif
+#if !defined (SIM_BUILD_OS)
     fprintf (st, "\n        Simulator Compiled as %s%s%s on %s at %s", cpp, arch, build, __DATE__, __TIME__);
+#else
+#define S_xstr(a) S_str(a)
+#define S_str(a) #a
+    fprintf (st, "\n        Simulator Compiled as %s%s%s on %s at %s %s", cpp, arch, build, __DATE__, __TIME__, S_xstr(SIM_BUILD_OS));
+#undef S_str
+#undef S_xstr
+#endif
 #endif
     fprintf (st, "\n        Memory Access: %s Endian", sim_end ? "Little" : "Big");
     fprintf (st, "\n        Memory Pointer Size: %d bits", (int)sizeof(dptr)*8);
@@ -5778,15 +5786,9 @@ t_stat pwd_cmd (int32 flg, CONST char *cptr)
 return show_cmd (0, "DEFAULT");
 }
 
-typedef void (*DIR_ENTRY_CALLBACK)(const char *directory, 
-                                   const char *filename,
-                                   t_offset FileSize,
-                                   const struct stat *filestat,
-                                   void *context);
-
 #if defined (_WIN32)
 
-static t_stat sim_dir_scan (const char *cptr, DIR_ENTRY_CALLBACK entry, void *context)
+t_stat sim_dir_scan (const char *cptr, DIR_ENTRY_CALLBACK entry, void *context)
 {
 HANDLE hFind;
 WIN32_FIND_DATAA File;
@@ -5841,7 +5843,7 @@ return SCPE_OK;
 #endif
 #endif /* defined (HAVE_GLOB) */
 
-static t_stat sim_dir_scan (const char *cptr, DIR_ENTRY_CALLBACK entry, void *context)
+t_stat sim_dir_scan (const char *cptr, DIR_ENTRY_CALLBACK entry, void *context)
 {
 #if defined (HAVE_GLOB)
 glob_t  paths;
@@ -5923,10 +5925,11 @@ if (dir) {
         if (fnmatch(MatchName, ent->d_name, 0))
             continue;
 #else
+        /* only match exact name without fnmatch support */
         if (strcmp(MatchName, ent->d_name) != 0)
             continue;
 #endif
-        sprintf (FileName, "%s/%s", DirName, ent->d_name);
+        sprintf (FileName, "%s%s", DirName, ent->d_name);
 #endif
         p_name = FileName + strlen (DirName);
         memset (&filestat, 0, sizeof (filestat));
@@ -7511,22 +7514,26 @@ for (i = 1; (dptr = sim_devices[i]) != NULL; i++) {     /* reposition all */
         }
     }
 if ((r = sim_ttrun ()) != SCPE_OK) {                    /* set console mode */
+    r = sim_messagef (SCPE_TTYERR, "sim_ttrun() returned: %s - errno: %d - %s\n", sim_error_text (r), errno, strerror (errno));
     sim_ttcmd ();
-    return sim_messagef (SCPE_TTYERR, "sim_ttrun() returned: %s\n", sim_error_text (r));
+    return r;
     }
 if ((r = sim_check_console (30)) != SCPE_OK) {          /* check console, error? */
+    r = sim_messagef (r, "sim_check_console () returned: %s - errno: %d - %s\n", sim_error_text (r), errno, strerror (errno));
     sim_ttcmd ();
-    sim_messagef (r, "sim_check_console () returned: %s\n", sim_error_text (r));
+    return r;
     }
 #ifdef SIGHUP
 if (signal (SIGHUP, int_handler) == SIG_ERR) {          /* set WRU */
+    r = sim_messagef (SCPE_SIGERR, "Can't establish SIGHUP: errno: %d - %s", errno, strerror (errno));
     sim_ttcmd ();
-    return sim_messagef (SCPE_SIGERR, "Can't establish SIGHUP");
+    return r;
     }
 #endif
 if (signal (SIGTERM, int_handler) == SIG_ERR) {         /* set WRU */
+    r = sim_messagef (SCPE_SIGERR, "Can't establish SIGTERM: errno: %d - %s", errno, strerror (errno));
     sim_ttcmd ();
-    return sim_messagef (SCPE_SIGERR, "Can't establish SIGTERM");
+    return r;
     }
 stop_cpu = FALSE;
 sim_is_running = TRUE;                                  /* flag running */
