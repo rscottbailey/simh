@@ -248,6 +248,9 @@
 #ifndef MAX
 #define MAX(a,b)  (((a) >= (b)) ? (a) : (b))
 #endif
+#ifndef MIN
+#define MIN(a,b)  (((a) <= (b)) ? (a) : (b))
+#endif
 
 /* search logical and boolean ops */
 
@@ -552,10 +555,10 @@ int32 sim_brk_lnt = 0;
 int32 sim_brk_ins = 0;
 int32 sim_quiet = 0;
 int32 sim_step = 0;
-char *sim_sub_instr = NULL;
-char *sim_sub_instr_buf = NULL;
-size_t sim_sub_instr_size = 0;
-size_t *sim_sub_instr_off = NULL;
+char *sim_sub_instr = NULL;         /* Copy of pre-substitution buffer contents */
+char *sim_sub_instr_buf = NULL;     /* Buffer address that substitutions were saved in */
+size_t sim_sub_instr_size = 0;      /* substitution buffer size */
+size_t *sim_sub_instr_off = NULL;   /* offsets in substitution buffer where original data started */
 static double sim_time;
 static uint32 sim_rtime;
 static int32 noqueue_time;
@@ -588,6 +591,7 @@ static const char *sim_do_ocptr[MAX_DO_NEST_LVL+1];
 static const char *sim_do_label[MAX_DO_NEST_LVL+1];
 
 t_stat sim_last_cmd_stat;                               /* Command Status */
+struct timespec cmd_time;                               /*  */
 
 static SCHTAB sim_stabr;                                /* Register search specifier */
 static SCHTAB sim_staba;                                /* Memory search specifier */
@@ -1452,8 +1456,8 @@ static const char simh_help[] =
       " Built In variables %%DATE%%, %%TIME%%, %%DATETIME%%, %%LDATE%%, %%LTIME%%,\n"
       " %%CTIME%%, %%DATE_YYYY%%, %%DATE_YY%%, %%DATE_YC%%, %%DATE_MM%%, %%DATE_MMM%%,\n"
       " %%DATE_MONTH%%, %%DATE_DD%%, %%DATE_D%%, %%DATE_WYYYY%%, %%DATE_WW%%,\n"
-      " %%TIME_HH%%, %%TIME_MM%%, %%TIME_SS%%, %%STATUS%%, %%TSTATUS%%, %%SIM_VERIFY%%,\n"
-      " %%SIM_QUIET%%, %%SIM_MESSAGE%% %%SIM_MESSAGE%%\n"
+      " %%TIME_HH%%, %%TIME_MM%%, %%TIME_SS%%, %%TIME_MSEC%%, %%STATUS%%, %%TSTATUS%%,\n"
+      " %%SIM_VERIFY%%, %%SIM_QUIET%%, %%SIM_MESSAGE%% %%SIM_MESSAGE%%\n"
       " %%SIM_NAME%%, %%SIM_BIN_NAME%%, %%SIM_BIN_PATH%%m %%SIM_OSTYPE%%\n\n"
       "+Token %%0 expands to the command file name.\n"
       "+Token %%n (n being a single digit) expands to the n'th argument\n"
@@ -1488,6 +1492,7 @@ static const char simh_help[] =
       "++%%TIME_HH%%           hh          (00-23)\n"
       "++%%TIME_MM%%           mm          (00-59)\n"
       "++%%TIME_SS%%           ss          (00-59)\n"
+      "++%%TIME_MSEC%%         msec        (000-999)\n"
       "++%%STATUS%%            Status value from the last command executed\n"
       "++%%TSTATUS%%           The text form of the last status value\n"
       "++%%SIM_VERIFY%%        The Verify/Verbose mode of the current Do command file\n"
@@ -3534,6 +3539,185 @@ return stat | SCPE_NOMESSAGE;                           /* suppress message sinc
    untouched.
 */
 
+static const char *
+_sim_get_env_special (const char *gbuf, char *rbuf, size_t rbuf_size)
+{
+const char *ap;
+char tbuf[CBUFSIZE];
+
+ap = getenv(gbuf);                      /* first try using the literal name */
+if (!ap) {
+    get_glyph (gbuf, tbuf, 0);          /* now try using the upcased name */
+    ap = getenv(tbuf);
+    }
+if (ap)                                 /* environment variable found? */
+    strlcpy (rbuf, ap, rbuf_size);      /* Return the environment value */
+else {                                  /* otherwise, check for Special Names */
+    time_t now = (time_t)cmd_time.tv_sec;
+    struct tm *tmnow = localtime(&now);
+
+    /* ISO 8601 format date/time info */
+    if (!strcmp ("DATE", gbuf)) {
+        sprintf (rbuf, "%4d-%02d-%02d", tmnow->tm_year+1900, tmnow->tm_mon+1, tmnow->tm_mday);
+        ap = rbuf;
+        }
+    else if (!strcmp ("TIME", gbuf)) {
+        sprintf (rbuf, "%02d:%02d:%02d", tmnow->tm_hour, tmnow->tm_min, tmnow->tm_sec);
+        ap = rbuf;
+        }
+    else if (!strcmp ("DATETIME", gbuf)) {
+        sprintf (rbuf, "%04d-%02d-%02dT%02d:%02d:%02d", tmnow->tm_year+1900, tmnow->tm_mon+1, tmnow->tm_mday, tmnow->tm_hour, tmnow->tm_min, tmnow->tm_sec);
+        ap = rbuf;
+        }
+    /* Locale oriented formatted date/time info */
+    else if (!strcmp ("LDATE", gbuf)) {
+        strftime (rbuf, rbuf_size, "%x", tmnow);
+        ap = rbuf;
+        }
+    else if (!strcmp ("LTIME", gbuf)) {
+#if defined(HAVE_C99_STRFTIME)
+        strftime (rbuf, rbuf_size, "%r", tmnow);
+#else
+        strftime (rbuf, rbuf_size, "%p", tmnow);
+        if (rbuf[0])
+            strftime (rbuf, rbuf_size, "%I:%M:%S %p", tmnow);
+        else
+            strftime (rbuf, rbuf_size, "%H:%M:%S", tmnow);
+#endif
+        ap = rbuf;
+        }
+    else if (!strcmp ("CTIME", gbuf)) {
+#if defined(HAVE_C99_STRFTIME)
+        strftime (rbuf, rbuf_size, "%c", tmnow);
+#else
+        strcpy (rbuf, ctime(&now));
+        rbuf[strlen (rbuf)-1] = '\0';    /* remove trailing \n */
+#endif
+        ap = rbuf;
+        }
+    else if (!strcmp ("UTIME", gbuf)) {
+        sprintf (rbuf, "%" LL_FMT "d", (LL_TYPE)now);
+        ap = rbuf;
+        }
+    /* Separate Date/Time info */
+    else if (!strcmp ("DATE_YYYY", gbuf)) {/* Year (0000-9999) */
+        strftime (rbuf, rbuf_size, "%Y", tmnow);
+        ap = rbuf;
+        }
+    else if (!strcmp ("DATE_YY", gbuf)) {/* Year (00-99) */
+        strftime (rbuf, rbuf_size, "%y", tmnow);
+        ap = rbuf;
+        }
+    else if (!strcmp ("DATE_YC", gbuf)) {/* Century (year/100) */
+        sprintf (rbuf, "%d", (tmnow->tm_year + 1900)/100);
+        ap = rbuf;
+        }
+    else if ((!strcmp ("DATE_19XX_YY", gbuf)) || /* Year with same calendar */
+             (!strcmp ("DATE_19XX_YYYY", gbuf))) {
+        int year = tmnow->tm_year + 1900;
+        int days = year - 2001;
+        int leaps = days/4 - days/100 + days/400;
+        int lyear = ((year % 4) == 0) && (((year % 100) != 0) || ((year % 400) == 0));
+        int selector = ((days + leaps + 7) % 7) + lyear * 7;
+        static int years[] = {90, 91, 97, 98, 99, 94, 89, 
+                              96, 80, 92, 76, 88, 72, 84};
+        int cal_year = years[selector];
+
+        if (!strcmp ("DATE_19XX_YY", gbuf))
+            sprintf (rbuf, "%d", cal_year);        /* 2 digit year */
+        else
+            sprintf (rbuf, "%d", cal_year + 1900); /* 4 digit year */
+        ap = rbuf;
+        }
+    else if (!strcmp ("DATE_MM", gbuf)) {/* Month number (01-12) */
+        strftime (rbuf, rbuf_size, "%m", tmnow);
+        ap = rbuf;
+        }
+    else if (!strcmp ("DATE_MMM", gbuf)) {/* abbreviated Month name */
+        strftime (rbuf, rbuf_size, "%b", tmnow);
+        ap = rbuf;
+        }
+    else if (!strcmp ("DATE_MONTH", gbuf)) {/* full Month name */
+        strftime (rbuf, rbuf_size, "%B", tmnow);
+        ap = rbuf;
+        }
+    else if (!strcmp ("DATE_DD", gbuf)) {/* Day of Month (01-31) */
+        strftime (rbuf, rbuf_size, "%d", tmnow);
+        ap = rbuf;
+        }
+    else if (!strcmp ("DATE_D", gbuf)) { /* ISO 8601 weekday number (1-7) */
+        sprintf (rbuf, "%d", (tmnow->tm_wday ? tmnow->tm_wday : 7));
+        ap = rbuf;
+        }
+    else if ((!strcmp ("DATE_WW", gbuf)) ||   /* ISO 8601 week number (01-53) */
+             (!strcmp ("DATE_WYYYY", gbuf))) {/* ISO 8601 week year number (0000-9999) */
+        int iso_yr = tmnow->tm_year + 1900;
+        int iso_wk = (tmnow->tm_yday + 11 - (tmnow->tm_wday ? tmnow->tm_wday : 7))/7;;
+
+        if (iso_wk == 0) {
+            iso_yr = iso_yr - 1;
+            tmnow->tm_yday += 365 + (((iso_yr % 4) == 0) ? 1 : 0);  /* Adjust for Leap Year (Correct thru 2099) */
+            iso_wk = (tmnow->tm_yday + 11 - (tmnow->tm_wday ? tmnow->tm_wday : 7))/7;
+            }
+        else
+            if ((iso_wk == 53) && (((31 - tmnow->tm_mday) + tmnow->tm_wday) < 4)) {
+                ++iso_yr;
+                iso_wk = 1;
+                }
+        if (!strcmp ("DATE_WW", gbuf))
+            sprintf (rbuf, "%02d", iso_wk);
+        else
+            sprintf (rbuf, "%04d", iso_yr);
+        ap = rbuf;
+        }
+    else if (!strcmp ("DATE_JJJ", gbuf)) {/* day of year (001-366) */
+        strftime (rbuf, rbuf_size, "%j", tmnow);
+        ap = rbuf;
+        }
+    else if (!strcmp ("TIME_HH", gbuf)) {/* Hour of day (00-23) */
+        strftime (rbuf, rbuf_size, "%H", tmnow);
+        ap = rbuf;
+        }
+    else if (!strcmp ("TIME_MM", gbuf)) {/* Minute of hour (00-59) */
+        strftime (rbuf, rbuf_size, "%M", tmnow);
+        ap = rbuf;
+        }
+    else if (!strcmp ("TIME_SS", gbuf)) {/* Second of minute (00-59) */
+        strftime (rbuf, rbuf_size, "%S", tmnow);
+        ap = rbuf;
+        }
+    else if (!strcmp ("TIME_MSEC", gbuf)) {/* Milliseconds of Second (000-999) */
+        sprintf (rbuf, "%03d", (int)(cmd_time.tv_nsec / 1000000));
+        ap = rbuf;
+        }
+    else if (!strcmp ("STATUS", gbuf)) {
+        sprintf (rbuf, "%08X", sim_last_cmd_stat);
+        ap = rbuf;
+        }
+    else if (!strcmp ("TSTATUS", gbuf)) {
+        sprintf (rbuf, "%s", sim_error_text (sim_last_cmd_stat));
+        ap = rbuf;
+        }
+    else if (!strcmp ("SIM_VERIFY", gbuf)) {
+        sprintf (rbuf, "%s", sim_do_echo ? "-V" : "");
+        ap = rbuf;
+        }
+    else if (!strcmp ("SIM_VERBOSE", gbuf)) {
+        sprintf (rbuf, "%s", sim_do_echo ? "-V" : "");
+        ap = rbuf;
+        }
+    else if (!strcmp ("SIM_QUIET", gbuf)) {
+        sprintf (rbuf, "%s", sim_quiet ? "-Q" : "");
+        ap = rbuf;
+        }
+    else if (!strcmp ("SIM_MESSAGE", gbuf)) {
+        sprintf (rbuf, "%s", sim_show_message ? "" : "-Q");
+        ap = rbuf;
+        }
+    }
+return ap;
+}
+
 void sim_sub_args (char *instr, size_t instr_size, char *do_arg[])
 {
 char gbuf[CBUFSIZE];
@@ -3543,11 +3727,8 @@ char rbuf[CBUFSIZE];
 int i;
 size_t instr_off = 0;
 size_t outstr_off = 0;
-time_t now;
-struct tm *tmnow;
 
-time(&now);
-tmnow = localtime(&now);
+clock_gettime(CLOCK_REALTIME, &cmd_time);
 tmpbuf = (char *)malloc(instr_size);
 op = tmpbuf;
 oend = tmpbuf + instr_size - 2;
@@ -3622,172 +3803,12 @@ for (; *ip && (op < oend); ) {
                             break;
                 ip = ip + 2;
                 }
-            else {                                      /* environment variable */
-                ap = NULL;
-                get_glyph_nc (ip+1, gbuf, '%');         /* first try using the literal name */
-                ap = getenv(gbuf);
-                if (!ap) {
-                    get_glyph (ip+1, gbuf, '%');        /* now try using the upcased name */
-                    ap = getenv(gbuf);
-                    }
+            else {                                      /* check environment variable or special variables */
+                get_glyph_nc (ip+1, gbuf, '%');         /* get the literal name */
+                ap = _sim_get_env_special (gbuf, rbuf, sizeof (rbuf));
                 ip += 1 + strlen (gbuf);
-                if (*ip == '%') ++ip;
-                if (!ap) {
-                    /* ISO 8601 format date/time info */
-                    if (!strcmp ("DATE", gbuf)) {
-                        sprintf (rbuf, "%4d-%02d-%02d", tmnow->tm_year+1900, tmnow->tm_mon+1, tmnow->tm_mday);
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("TIME", gbuf)) {
-                        sprintf (rbuf, "%02d:%02d:%02d", tmnow->tm_hour, tmnow->tm_min, tmnow->tm_sec);
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("DATETIME", gbuf)) {
-                        sprintf (rbuf, "%04d-%02d-%02dT%02d:%02d:%02d", tmnow->tm_year+1900, tmnow->tm_mon+1, tmnow->tm_mday, tmnow->tm_hour, tmnow->tm_min, tmnow->tm_sec);
-                        ap = rbuf;
-                        }
-                    /* Locale oriented formatted date/time info */
-                    else if (!strcmp ("LDATE", gbuf)) {
-                        strftime (rbuf, sizeof(rbuf), "%x", tmnow);
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("LTIME", gbuf)) {
-#if defined(HAVE_C99_STRFTIME)
-                        strftime (rbuf, sizeof(rbuf), "%r", tmnow);
-#else
-                        strftime (rbuf, sizeof(rbuf), "%p", tmnow);
-                        if (rbuf[0])
-                            strftime (rbuf, sizeof(rbuf), "%I:%M:%S %p", tmnow);
-                        else
-                            strftime (rbuf, sizeof(rbuf), "%H:%M:%S", tmnow);
-#endif
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("CTIME", gbuf)) {
-#if defined(HAVE_C99_STRFTIME)
-                        strftime (rbuf, sizeof(rbuf), "%c", tmnow);
-#else
-                        strcpy (rbuf, ctime(&now));
-                        rbuf[strlen (rbuf)-1] = '\0';    /* remove trailing \n */
-#endif
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("UTIME", gbuf)) {
-                        sprintf (rbuf, "%" LL_FMT "d", (LL_TYPE)now);
-                        ap = rbuf;
-                        }
-                    /* Separate Date/Time info */
-                    else if (!strcmp ("DATE_YYYY", gbuf)) {/* Year (0000-9999) */
-                        strftime (rbuf, sizeof(rbuf), "%Y", tmnow);
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("DATE_YY", gbuf)) {/* Year (00-99) */
-                        strftime (rbuf, sizeof(rbuf), "%y", tmnow);
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("DATE_YC", gbuf)) {/* Century (year/100) */
-                        sprintf (rbuf, "%d", (tmnow->tm_year + 1900)/100);
-                        ap = rbuf;
-                        }
-                    else if ((!strcmp ("DATE_19XX_YY", gbuf)) || /* Year with same calendar */
-                             (!strcmp ("DATE_19XX_YYYY", gbuf))) {
-                        int year = tmnow->tm_year + 1900;
-                        int days = year - 2001;
-                        int leaps = days/4 - days/100 + days/400;
-                        int lyear = ((year % 4) == 0) && (((year % 100) != 0) || ((year % 400) == 0));
-                        int selector = ((days + leaps + 7) % 7) + lyear * 7;
-                        static int years[] = {90, 91, 97, 98, 99, 94, 89, 
-                                              96, 80, 92, 76, 88, 72, 84};
-                        int cal_year = years[selector];
-
-                        if (!strcmp ("DATE_19XX_YY", gbuf))
-                            sprintf (rbuf, "%d", cal_year);        /* 2 digit year */
-                        else
-                            sprintf (rbuf, "%d", cal_year + 1900); /* 4 digit year */
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("DATE_MM", gbuf)) {/* Month number (01-12) */
-                        strftime (rbuf, sizeof(rbuf), "%m", tmnow);
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("DATE_MMM", gbuf)) {/* abbreviated Month name */
-                        strftime (rbuf, sizeof(rbuf), "%b", tmnow);
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("DATE_MONTH", gbuf)) {/* full Month name */
-                        strftime (rbuf, sizeof(rbuf), "%B", tmnow);
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("DATE_DD", gbuf)) {/* Day of Month (01-31) */
-                        strftime (rbuf, sizeof(rbuf), "%d", tmnow);
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("DATE_D", gbuf)) { /* ISO 8601 weekday number (1-7) */
-                        sprintf (rbuf, "%d", (tmnow->tm_wday ? tmnow->tm_wday : 7));
-                        ap = rbuf;
-                        }
-                    else if ((!strcmp ("DATE_WW", gbuf)) ||   /* ISO 8601 week number (01-53) */
-                             (!strcmp ("DATE_WYYYY", gbuf))) {/* ISO 8601 week year number (0000-9999) */
-                        int iso_yr = tmnow->tm_year + 1900;
-                        int iso_wk = (tmnow->tm_yday + 11 - (tmnow->tm_wday ? tmnow->tm_wday : 7))/7;;
-
-                        if (iso_wk == 0) {
-                            iso_yr = iso_yr - 1;
-                            tmnow->tm_yday += 365 + (((iso_yr % 4) == 0) ? 1 : 0);  /* Adjust for Leap Year (Correct thru 2099) */
-                            iso_wk = (tmnow->tm_yday + 11 - (tmnow->tm_wday ? tmnow->tm_wday : 7))/7;
-                            }
-                        else
-                            if ((iso_wk == 53) && (((31 - tmnow->tm_mday) + tmnow->tm_wday) < 4)) {
-                                ++iso_yr;
-                                iso_wk = 1;
-                                }
-                        if (!strcmp ("DATE_WW", gbuf))
-                            sprintf (rbuf, "%02d", iso_wk);
-                        else
-                            sprintf (rbuf, "%04d", iso_yr);
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("DATE_JJJ", gbuf)) {/* day of year (001-366) */
-                        strftime (rbuf, sizeof(rbuf), "%j", tmnow);
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("TIME_HH", gbuf)) {/* Hour of day (00-23) */
-                        strftime (rbuf, sizeof(rbuf), "%H", tmnow);
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("TIME_MM", gbuf)) {/* Minute of hour (00-59) */
-                        strftime (rbuf, sizeof(rbuf), "%M", tmnow);
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("TIME_SS", gbuf)) {/* Second of minute (00-59) */
-                        strftime (rbuf, sizeof(rbuf), "%S", tmnow);
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("STATUS", gbuf)) {
-                        sprintf (rbuf, "%08X", sim_last_cmd_stat);
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("TSTATUS", gbuf)) {
-                        sprintf (rbuf, "%s", sim_error_text (sim_last_cmd_stat));
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("SIM_VERIFY", gbuf)) {
-                        sprintf (rbuf, "%s", sim_do_echo ? "-V" : "");
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("SIM_VERBOSE", gbuf)) {
-                        sprintf (rbuf, "%s", sim_do_echo ? "-V" : "");
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("SIM_QUIET", gbuf)) {
-                        sprintf (rbuf, "%s", sim_quiet ? "-Q" : "");
-                        ap = rbuf;
-                        }
-                    else if (!strcmp ("SIM_MESSAGE", gbuf)) {
-                        sprintf (rbuf, "%s", sim_show_message ? "" : "-Q");
-                        ap = rbuf;
-                        }
-                    }
+                if (*ip == '%') 
+                    ++ip;
                 }
             if (ap) {                                   /* non-null arg? */
                 while (*ap && (op < oend)) {            /* copy the argument */
@@ -4035,6 +4056,8 @@ else {
     if (*cptr == '(') {
         t_svalue value;
 
+        if ((cptr > sim_sub_instr_buf) && ((size_t)(cptr - sim_sub_instr_buf) < sim_sub_instr_size))
+            cptr = &sim_sub_instr[sim_sub_instr_off[cptr - sim_sub_instr_buf]]; /* get un-substituted string */
         cptr = sim_eval_expression (cptr, &value, TRUE, &r);
         result = (value != 0);
         }
@@ -4095,6 +4118,8 @@ else {
             }
         }
     }
+if ((cptr > sim_sub_instr_buf) && ((size_t)(cptr - sim_sub_instr_buf) < sim_sub_instr_size))
+    cptr = &sim_sub_instr[sim_sub_instr_off[cptr - sim_sub_instr_buf]]; /* get un-substituted string */
 if (Not ^ result) {
     if (!flag)
         sim_brk_setact (cptr);                          /* set up IF actions */
@@ -4675,10 +4700,10 @@ else {
     cptr = get_glyph (cptr, varname, '=');              /* get environment variable name */
     strlcpy (cbuf, cptr, sizeof(cbuf));
     sim_trim_endspc (cbuf);
-    cptr = cbuf;
     if (sim_switches & SWMASK ('S')) {                  /* Quote String argument? */
         uint32 str_size;
 
+        cptr = cbuf;
         get_glyph_quoted (cptr, cbuf, 0);
         if (SCPE_OK != sim_decode_quoted_string (cbuf, (uint8 *)cbuf, &str_size)) 
             return sim_messagef (SCPE_ARG, "Invalid quoted string: %s\n", cbuf);
@@ -4688,8 +4713,11 @@ else {
         if (sim_switches & SWMASK ('A')) {              /* Arithmentic Expression Evaluation argument? */
             t_svalue val;
             t_stat stat;
+            const char *eptr = cptr;
 
-            cptr = sim_eval_expression (cptr, &val, FALSE, &stat);
+            if ((cptr > sim_sub_instr_buf) && ((size_t)(cptr - sim_sub_instr_buf) < sim_sub_instr_size))
+                eptr = &sim_sub_instr[sim_sub_instr_off[cptr - sim_sub_instr_buf]]; /* get un-substituted string */
+            cptr = sim_eval_expression (eptr, &val, FALSE, &stat);
             if (stat == SCPE_OK) {
                 sprintf (cbuf, "%ld", (long)val);
                 cptr = cbuf;
@@ -5795,30 +5823,27 @@ WIN32_FIND_DATAA File;
 struct stat filestat;
 char WildName[PATH_MAX + 1];
 
-if ((!stat (cptr, &filestat)) && (filestat.st_mode & S_IFDIR)) {
-    sprintf (WildName, "%s%c*", cptr, strchr (cptr, '/') ? '/' : '\\');
-    cptr = WildName;
-    }
+strlcpy (WildName, cptr, sizeof(WildName));
+cptr = WildName;
+sim_trim_endspc (WildName);
 if ((hFind =  FindFirstFileA (cptr, &File)) != INVALID_HANDLE_VALUE) {
     t_int64 FileSize;
     char DirName[PATH_MAX + 1], FileName[PATH_MAX + 1];
-    const char *c;
-    char pathsep = '/';
+    char *c;
+    const char *backslash = strchr (cptr, '\\');
+    const char *slash = strchr (cptr, '/');
+    const char *pathsep = (backslash && slash) ? MIN (backslash, slash) : (backslash ? backslash : slash);
 
     GetFullPathNameA(cptr, sizeof(DirName), DirName, (char **)&c);
-    c = strrchr(DirName, pathsep);
-    if (NULL == c) {
-        pathsep = '\\';
-        c = strrchr(cptr, pathsep);
+    c = strrchr (DirName, '\\');
+    *c = '\0';                                  /* Truncate to just directory path */
+    if (!pathsep || (!strcmp (slash, "/*")))    /* Separator wasn't mentioned? */
+        pathsep = "\\";                         /* Default to Windows backslash */
+    if (*pathsep == '/') {                      /* If slash separator? */
+        while ((c = strchr (DirName, '\\')))
+            *c = '/';                           /* Convert backslash to slash */
         }
-    if (c) {
-        memcpy(DirName, cptr, c - cptr);
-        DirName[c - cptr] = '\0';
-        }
-    else {
-        getcwd(DirName, PATH_MAX);
-        }
-    sprintf (&DirName[strlen (DirName)], "%c", pathsep);
+    sprintf (&DirName[strlen (DirName)], "%c", *pathsep);
     do {
         FileSize = (((t_int64)(File.nFileSizeHigh)) << 32) | File.nFileSizeLow;
         sprintf (FileName, "%s%s", DirName, File.cFileName);
@@ -5859,8 +5884,6 @@ memset (WholeName, 0, sizeof(WholeName));
 strlcpy (WildName, cptr, sizeof(WildName));
 cptr = WildName;
 sim_trim_endspc (WildName);
-if ((!stat (WildName, &filestat)) && (filestat.st_mode & S_IFDIR))
-    strlcat (WildName, "/*", sizeof (WildName));
 if ((*cptr != '/') || (0 == memcmp (cptr, "./", 2)) || (0 == memcmp (cptr, "../", 3))) {
 #if defined (VMS)
     getcwd (WholeName, sizeof (WholeName)-1, 0);
@@ -6017,16 +6040,27 @@ sim_printf (" %s\n", filename);
 t_stat dir_cmd (int32 flg, CONST char *cptr)
 {
 DIR_CTX dir_state;
-t_stat stat;
+t_stat r;
+char WildName[PATH_MAX + 1];
+
 
 memset (&dir_state, 0, sizeof (dir_state));
+strlcpy (WildName, cptr, sizeof(WildName));
+cptr = WildName;
+sim_trim_endspc (WildName);
 if (*cptr == '\0')
     cptr = "./*";
-stat = sim_dir_scan (cptr, sim_dir_entry, &dir_state);
+else {
+    struct stat filestat;
+
+    if ((!stat (WildName, &filestat)) && (filestat.st_mode & S_IFDIR))
+        strlcat (WildName, "/*", sizeof (WildName));
+    }
+r = sim_dir_scan (cptr, sim_dir_entry, &dir_state);
 sim_dir_entry (NULL, NULL, 0, NULL, &dir_state);    /* output summary */
-if (stat != SCPE_OK)
+if (r != SCPE_OK)
     return sim_messagef (SCPE_ARG, "File Not Found\n");
-return stat;
+return r;
 }
 
 
@@ -6731,8 +6765,13 @@ if ((uptr->flags & UNIT_BUF) && (uptr->filebuf)) {
 uptr->flags = uptr->flags & ~(UNIT_ATT | ((uptr->flags & UNIT_ROABLE) ? UNIT_RO : 0));
 free (uptr->filename);
 uptr->filename = NULL;
-if (fclose (uptr->fileref) == EOF)
-    return SCPE_IOERR;
+if (uptr->fileref) {                        /* Only close open file */
+    if (fclose (uptr->fileref) == EOF) {
+        uptr->fileref = NULL;
+        return SCPE_IOERR;
+        }
+    uptr->fileref = NULL;
+    }
 return SCPE_OK;
 }
 
@@ -9359,32 +9398,34 @@ return (dptr->flags & DEV_DIS? TRUE: FALSE);
 
 REG *find_reg_glob_reason (CONST char *cptr, CONST char **optr, DEVICE **gdptr, t_stat *stat)
 {
-int32 i;
-DEVICE *dptr;
+int32 i, j;
+DEVICE *dptr, **devs, **dptrptr[] = {sim_devices, sim_internal_devices, NULL};
 REG *rptr, *srptr = NULL;
 
 if (stat)
     *stat = SCPE_OK;
 *gdptr = NULL;
-for (i = 0; (dptr = sim_devices[i]) != 0; i++) {        /* all dev */
-    if (dptr->flags & DEV_DIS)                          /* skip disabled */
-        continue;
-    if ((rptr = find_reg (cptr, optr, dptr))) {         /* found? */
-        if (srptr) {                                    /* ambig? err */
-            if (stat) {
-                if (sim_show_message) {
-                    if (*stat == SCPE_OK)
-                        sim_printf ("Ambiguous register.  %s appears in devices %s and %s", cptr, (*gdptr)->name, dptr->name);
-                    else
-                        sim_printf (" and %s", dptr->name);
+for (j = 0; (devs = dptrptr[j]) != NULL; j++) {
+    for (i = 0; (dptr = devs[i]) != NULL; i++) {        /* all dev */
+        if (dptr->flags & DEV_DIS)                          /* skip disabled */
+            continue;
+        if ((rptr = find_reg (cptr, optr, dptr))) {         /* found? */
+            if (srptr) {                                    /* ambig? err */
+                if (stat) {
+                    if (sim_show_message) {
+                        if (*stat == SCPE_OK)
+                            sim_printf ("Ambiguous register.  %s appears in devices %s and %s", cptr, (*gdptr)->name, dptr->name);
+                        else
+                            sim_printf (" and %s", dptr->name);
+                        }
+                    *stat = SCPE_AMBREG|SCPE_NOMESSAGE;
                     }
-                *stat = SCPE_AMBREG|SCPE_NOMESSAGE;
+                else
+                    return NULL;
                 }
-            else
-                return NULL;
+            srptr = rptr;                                   /* save reg */
+            *gdptr = dptr;                                  /* save unit */
             }
-        srptr = rptr;                                   /* save reg */
-        *gdptr = dptr;                                  /* save unit */
         }
     }
 if (stat && (*stat != SCPE_OK)) {
@@ -11059,7 +11100,6 @@ if ((ep != NULL) && (*ep != ';')) {                     /* if a quoted string is
             ep = ep + 1;                                /*     skip the non-quote character */  
     ep = strchr (ep, ';');                              /* the next semicolon is outside the quotes if it exists */
     }
-
 if (ep != NULL) {                                       /* if a semicolon is present */
     lnt = ep - sim_brk_act[sim_do_depth];               /* cmd length */
     memcpy (buf, sim_brk_act[sim_do_depth], lnt + 1);   /* copy with ; */
@@ -11070,6 +11110,7 @@ else {
     strlcpy (buf, sim_brk_act[sim_do_depth], size);     /* copy action */
     sim_brk_clract ();                                  /* no more */
     }
+sim_trim_endspc (buf);
 return buf;
 }
 
@@ -13440,12 +13481,16 @@ return factorx * factory;
 
 static t_svalue _op_div (t_svalue divisor, t_svalue dividend)
 {
-return dividend / divisor;
+if (divisor != 0)
+    return dividend / divisor;
+return T_SVALUE_MAX;
 }
 
 static t_svalue _op_mod (t_svalue divisor, t_svalue dividend)
 {
-return dividend % divisor;
+if (divisor != 0)
+    return dividend % divisor;
+return 0;
 }
 
 static t_svalue _op_comp (t_svalue data, t_svalue unused)
@@ -13600,7 +13645,7 @@ static const char BinaryDigits[] = "01";
 while (isspace (*cptr))
     ++cptr;
 if (isalpha (*cptr)) {
-    while (isalnum (*cptr))
+    while (isalnum (*cptr) || (*cptr == '.') || (*cptr == '_'))
         *buf++ = *cptr++;
     *buf = '\0';
     }
@@ -13775,9 +13820,26 @@ return cptr;                    /* return any unprocessed input */
 static t_bool _value_of (const char *data, t_svalue *svalue, char *string, size_t string_size)
 {
 CONST char *gptr;
-if (isalpha (*data)) {
-    REG *rptr = find_reg (data, &gptr, sim_dfdev);
 
+if (isalpha (*data)) {
+    REG *rptr = NULL;
+    DEVICE *dptr = sim_dfdev;
+    const char *dot;
+    
+    dot = strchr (data, '.');
+    if (dot) {
+        char devnam[CBUFSIZE];
+
+        memcpy (devnam, data, dot - data);
+        devnam[dot - data] = '\0';
+        if (find_dev (devnam)) {
+            dptr = find_dev (devnam);
+            data = dot + 1;
+            rptr = find_reg (data, &gptr, dptr);
+            }
+        }
+    else
+        rptr = find_reg_glob (data, &gptr, &dptr);
     if (rptr) {
         *svalue = (t_svalue)get_rval (rptr, 0);
         sprint_val (string + 1, *svalue, 10, string_size - 2, PV_LEFTSIGN);
@@ -13785,8 +13847,15 @@ if (isalpha (*data)) {
         strlcpy (&string[strlen (string)], "\"", string_size - strlen (string));
         return TRUE;
         }
-    gptr = getenv (data);
-    data = (gptr ? gptr : "");
+    gptr = _sim_get_env_special (data, string + 1, string_size - 2);
+    if (gptr) {
+        *svalue = strtotsv(string + 1, &gptr, 0);
+        *string = '"';
+        strlcpy (&string[strlen (string)], "\"", string_size - strlen (string));
+        return (*gptr == '\0');
+        }
+    else
+        data = "";
     }
 *svalue = strtotsv(data, &gptr, 0);
 snprintf (string, string_size - 1, "\"%s\"", data);
