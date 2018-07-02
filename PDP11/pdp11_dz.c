@@ -536,7 +536,7 @@ switch ((PA >> 1) & 03) {                               /* case on PA<2:1> */
             if (c >= 0) {                               /* store char */
                 tmxr_putc_ln (lp, c);
                 dz_update_xmti ();
-                sim_activate_after_abs (&dz_unit[1], lp->txdelta);/* */
+                sim_activate_after_abs (&dz_unit[1], lp->txdeltausecs);
                 }
             }
         break;
@@ -590,6 +590,7 @@ t_stat dz_xmt_svc (UNIT *uptr)
 {
 tmxr_poll_tx (&dz_desc);                                /* poll output */
 dz_update_xmti ();                                      /* update int */
+sim_activate_after (uptr, 500000);                      /* reactivate occasionally */
 return SCPE_OK;
 }
 
@@ -784,6 +785,8 @@ sim_debug(DBG_TRC, dptr, "dz_reset()\n");
 if (dz_ldsc == NULL) {
     dz_desc.lines = DZ_MUXES * DZ_LINES;
     dz_desc.ldsc = dz_ldsc = (TMLN *)calloc (dz_desc.lines, sizeof(*dz_ldsc));
+    sim_set_uname (&dz_unit[0], "DZ-RCV-CON");
+    sim_set_uname (&dz_unit[1], "DZ-XMT");
     }
 if ((dz_desc.lines % DZ_LINES) != 0) {      /* Transition from Qbus to Unibus device */
     int32 newln = DZ_LINES * (1 + (dz_desc.lines / DZ_LINES));
