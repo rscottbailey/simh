@@ -1535,7 +1535,27 @@ static const char simh_help[] =
       "+then looked up as an environment variable.  If found it the value is\n"
       "+supstituted for the original string before expanding everything else.  If\n"
       "+it is not found, then the original beginning token on the line is left\n"
-      "+untouched.\n"
+      "+untouched.\n\n"
+      "+Environment variable string substitution:\n\n"
+      "++%%XYZ:str1=str2%%\n\n"
+      "+would expand the XYZ environment variable, substituting each occurrence\n"
+      "+of \"str1\" in the expanded result with \"str2\".  \"str2\" can be the empty\n"
+      "+string to effectively delete all occurrences of \"str1\" from the expanded\n"
+      "+output.  \"str1\" can begin with an asterisk, in which case it will match\n"
+      "+everything from the beginning of the expanded output to the first\n"
+      "+occurrence of the remaining portion of str1.\n\n"
+      "+May also specify substrings for an expansion.\n\n"
+      "++%%XYZ:~10,5%%\n\n"
+      "+would expand the XYZ environment variable, and then use only the 5\n"
+      "+characters that begin at the 11th (offset 10) character of the expanded\n"
+      "+result.  If the length is not specified, then it defaults to the\n"
+      "+remainder of the variable value.  If either number (offset or length) is\n"
+      "+negative, then the number used is the length of the environment variable\n"
+      "+value added to the offset or length specified.\n\n"
+      "++%%XYZ:~-10%%\n\n"
+      "+would extract the last 10 characters of the XYZ variable.\n\n"
+      "++%%XYZ:~0,-2%%\n\n"
+      "+would extract all but the last 2 characters of the XYZ variable.\n"
 #define HLP_GOTO        "*Commands Executing_Command_Files GOTO"
       "3GOTO\n"
       " Commands in a command file execute in sequence until either an error\n"
@@ -1761,7 +1781,10 @@ static const char simh_help[] =
       " followed by a newline:\n\n"
        /***************** 80 character line width template *************************/
       "++ECHOF {-n} \"<string>\"|<string>   output string to console\n\n"
-      " If there is no argument, ECHOF prints a blank line on the console.\n"
+      " The ECHOF command can also print output on a specified multiplexer line\n"
+      " (and log) followed by a newline:\n\n"
+      "++ECHOF {-n} dev:line \"<string>\"|<string>   output string to specified line\n\n"
+      " If there is no argument, ECHOF prints a blank line.\n"
       " The string argument may be delimited by quote characters.  Quotes may\n"
       " be either single or double but the opening and closing quote characters\n"
       " must match.  If the string is enclosed in quotes, the string may\n"
@@ -2413,17 +2436,23 @@ sim_is_running = FALSE;
 sim_log = NULL;
 if (sim_emax <= 0)
     sim_emax = 1;
-sim_timer_init ();
+if (sim_timer_init ()) {
+    fprintf (stderr, "Fatal timer initialization error\n");
+    read_line_p ("Hit Return to exit: ", cbuf, sizeof (cbuf) - 1, stdin);
+    return 0;
+    }
 sim_register_internal_device (&sim_expect_dev);
 sim_register_internal_device (&sim_step_dev);
 
 if ((stat = sim_ttinit ()) != SCPE_OK) {
     fprintf (stderr, "Fatal terminal initialization error\n%s\n",
         sim_error_text (stat));
+    read_line_p ("Hit Return to exit: ", cbuf, sizeof (cbuf) - 1, stdin);
     return 0;
     }
 if ((sim_eval = (t_value *) calloc (sim_emax, sizeof (t_value))) == NULL) {
     fprintf (stderr, "Unable to allocate examine buffer\n");
+    read_line_p ("Hit Return to exit: ", cbuf, sizeof (cbuf) - 1, stdin);
     return 0;
     };
 if (sim_dflt_dev == NULL)                               /* if no default */
@@ -2431,11 +2460,13 @@ if (sim_dflt_dev == NULL)                               /* if no default */
 if ((stat = reset_all_p (0)) != SCPE_OK) {
     fprintf (stderr, "Fatal simulator initialization error\n%s\n",
         sim_error_text (stat));
+    read_line_p ("Hit Return to exit: ", cbuf, sizeof (cbuf) - 1, stdin);
     return 0;
     }
 if ((stat = sim_brk_init ()) != SCPE_OK) {
     fprintf (stderr, "Fatal breakpoint table initialization error\n%s\n",
         sim_error_text (stat));
+    read_line_p ("Hit Return to exit: ", cbuf, sizeof (cbuf) - 1, stdin);
     return 0;
     }
 signal (SIGINT, int_handler);
@@ -3238,12 +3269,21 @@ return SCPE_OK;
 t_stat echof_cmd (int32 flag, CONST char *cptr)
 {
 char gbuf[CBUFSIZE];
-uint8 dbuf[CBUFSIZE];
+CONST char *tptr;
+TMLN *lp = NULL;
+uint8 dbuf[4*CBUFSIZE];
 uint32 dsize = 0;
+t_stat r;
 
 GET_SWITCHES (cptr);
-if (!*cptr)
-    return SCPE_2FARG;
+tptr = get_glyph (cptr, gbuf, ',');
+if (sim_isalpha(gbuf[0]) && (strchr (gbuf, ':'))) {
+    r = tmxr_locate_line (gbuf, &lp);
+    if (r != SCPE_OK)
+        return r;
+    cptr = tptr;
+    }
+GET_SWITCHES (cptr);
 if ((*cptr == '"') || (*cptr == '\'')) {
     cptr = get_glyph_quoted (cptr, gbuf, 0);
     if (*cptr != '\0')
@@ -3253,7 +3293,12 @@ if ((*cptr == '"') || (*cptr == '\'')) {
     dbuf[dsize] = 0;
     cptr = (char *)dbuf;
     }
-sim_printf ("%s%s", cptr, (sim_switches & SWMASK('N')) ? "" : "\n");
+if (lp) {
+    tmxr_linemsgf (lp, "%s%s", cptr, (sim_switches & SWMASK('N')) ? "" : "\r\n");
+    tmxr_send_buffered_data (lp);
+    }
+else
+    sim_printf ("%s%s", cptr, (sim_switches & SWMASK('N')) ? "" : "\n");
 return SCPE_OK;
 }
 
@@ -3593,11 +3638,128 @@ if (ap) {                               /* environment variable found? */
 return ap;
 }
 
+/*
+Environment variable substitution:
+
+    %XYZ:str1=str2%
+
+would expand the XYZ environment variable, substituting each occurrence
+of "str1" in the expanded result with "str2".  "str2" can be the empty
+string to effectively delete all occurrences of "str1" from the expanded
+output.  "str1" can begin with an asterisk, in which case it will match
+everything from the beginning of the expanded output to the first
+occurrence of the remaining portion of str1.
+
+May also specify substrings for an expansion.
+
+    %XYZ:~10,5%
+
+would expand the XYZ environment variable, and then use only the 5
+characters that begin at the 11th (offset 10) character of the expanded
+result.  If the length is not specified, then it defaults to the
+remainder of the variable value.  If either number (offset or length) is
+negative, then the number used is the length of the environment variable
+value added to the offset or length specified.
+
+    %XYZ:~-10%
+
+would extract the last 10 characters of the XYZ variable.
+
+    %XYZ:~0,-2%
+
+would extract all but the last 2 characters of the XYZ variable.
+
+ */
+
+static void _sim_subststr_substr (const char *ops, char *rbuf, size_t rbuf_size)
+{
+int rbuf_len = (int)strlen (rbuf);
+char *tstr = (char *)malloc (1 + rbuf_len);
+
+strcpy (tstr, rbuf);
+
+if (*ops == '~') {      /* Substring? */
+    int offset = 0, length = rbuf_len;
+    int o, l;
+
+    switch (sscanf (ops + 1, "%d,%d", &o, &l)) {
+        case 2:
+            if (l < 0)
+                length = rbuf_len - MIN(-l, rbuf_len);
+            else
+                length = l;
+            /* fall through */
+        case 1:
+            if (o < 0)
+                offset = rbuf_len - MIN(-o, rbuf_len);
+            else
+                offset = MIN(o, rbuf_len);
+            break;
+        case 0:
+            offset = 0;
+            length = rbuf_len;
+            break;
+        }
+    if (offset + length > rbuf_len)
+        length = rbuf_len - offset;
+    memcpy (rbuf, tstr + offset, length);
+    rbuf[length] = '\0';
+    }
+else {
+    const char *eq;
+
+    if ((eq = strchr (ops, '='))) {     /* Substitute? */
+        const char *last = tstr;
+        const char *curr = tstr;
+        char *match = (char *)malloc (1 + (eq - ops));
+        size_t move_size;
+        t_bool asterisk_match;
+
+        strlcpy (match, ops, 1 + (eq - ops));
+        asterisk_match = (*ops == '*');
+        if (asterisk_match)
+            memmove (match, match + 1, 1 + strlen (match + 1));
+        while ((curr = strstr (last, match))) {
+            if (!asterisk_match) {
+                move_size = MIN((size_t)(curr - last), rbuf_size);
+                memcpy (rbuf, last, move_size);
+                rbuf_size -= move_size;
+                rbuf += move_size;
+                }
+            else
+                asterisk_match = FALSE;
+            move_size = MIN(strlen (eq + 1), rbuf_size);
+            memcpy (rbuf, eq + 1, move_size);
+            rbuf_size -= move_size;
+            rbuf += move_size;
+            curr += strlen (match);
+            last = curr;
+            }
+        move_size = MIN(strlen (last), rbuf_size);
+        memcpy (rbuf, last, move_size);
+        rbuf_size -= move_size;
+        rbuf += move_size;
+        if (rbuf_size)
+            *rbuf = '\0';
+        free (match);
+        }
+    }
+free (tstr);
+}
+
 static const char *
 _sim_get_env_special (const char *gbuf, char *rbuf, size_t rbuf_size)
 {
 const char *ap;
+const char *fixup_needed = strchr (gbuf, ':');
+char *tgbuf = NULL;
+size_t tgbuf_size = MAX(rbuf_size, 1 + (size_t)(fixup_needed - gbuf));
 
+if (fixup_needed) {
+    tgbuf = (char *)calloc (tgbuf_size, 1);
+    memcpy (tgbuf, gbuf, (fixup_needed - gbuf));
+    gbuf = tgbuf;
+    }
 ap = _sim_gen_env_uplowcase (gbuf, rbuf, rbuf_size);/* Look for environment variable */
 if (!ap) {                              /* no environment variable found? */
     time_t now = (time_t)cmd_time.tv_sec;
@@ -3762,6 +3924,12 @@ if (!ap) {                              /* no environment variable found? */
         ap = rbuf;
         }
     }
+if (ap && fixup_needed) {   /* substring/substituted needed? */
+    strlcpy (tgbuf, ap, tgbuf_size);
+    _sim_subststr_substr (fixup_needed + 1, tgbuf, tgbuf_size);
+    strlcpy (rbuf, tgbuf, rbuf_size);
+    }
+free (tgbuf);
 return ap;
 }
 
@@ -10436,6 +10604,13 @@ do {
             reason = SCPE_OK;
         }
     AIO_EVENT_COMPLETE(uptr, reason);
+    if ((reason != SCPE_OK)     &&  /* Provide context for unexpected errors */
+        (reason != SCPE_STOP)   && 
+        (reason != SCPE_STEP)   && 
+        (reason != SCPE_EXPECT) &&
+        (reason != SCPE_EXIT)   && 
+        (reason != SCPE_REMOTE))
+        reason = sim_messagef (SCPE_IERR, "\nUnexpected internal error while processing event for %s which returned %d - %s\n", sim_uname (uptr), reason, sim_error_text (reason));
     } while ((reason == SCPE_OK) && 
              (sim_interval <= 0) && 
              (sim_clock_queue != QUEUE_LIST_END) &&
@@ -12277,7 +12452,7 @@ if (sim_deb && (((sim_deb != stdout) && (sim_deb != sim_log)) || inhibit_message
 
 if (buf != stackbuf)
     free (buf);
-return stat | SCPE_NOMESSAGE;
+return stat | ((stat != SCPE_OK) ? SCPE_NOMESSAGE : 0);
 }
 
 /* Inline debugging - will print debug message if debug file is
