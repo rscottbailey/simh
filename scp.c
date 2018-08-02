@@ -223,6 +223,7 @@
 #include "sim_disk.h"
 #include "sim_tape.h"
 #include "sim_ether.h"
+#include "sim_card.h"
 #include "sim_serial.h"
 #include "sim_video.h"
 #include "sim_sock.h"
@@ -519,7 +520,9 @@ t_stat do_cmd_label (int32 flag, CONST char *cptr, CONST char *label);
 void int_handler (int signal);
 t_stat set_prompt (int32 flag, CONST char *cptr);
 t_stat sim_set_asynch (int32 flag, CONST char *cptr);
-static const char *get_dbg_verb (uint32 dbits, DEVICE* dptr, UNIT *uptr);
+static const char *_get_dbg_verb (uint32 dbits, DEVICE* dptr, UNIT *uptr);
+static t_stat sim_library_unit_tests (void);
+static t_stat _sim_debug_flush (void);
 
 /* Global data */
 
@@ -1210,6 +1213,9 @@ static const char simh_help[] =
       "5-D\n"
       " The -D switch causes data blob output to also display the data as\n"
       " RADIX-50 characters.\n"
+      "5-F\n"
+      " The -F switch causes duplicate successive lines of debug to be\n"
+      " summarized to reduce noise from the debug data stream.\n"
       "5-E\n"
       " The -E switch causes data blob output to also display the data as\n"
       " EBCDIC characters.\n"
@@ -2532,6 +2538,9 @@ else if (*argv[0]) {                                    /* sim name arg? */
         }
     }
 
+if (sim_switches & SWMASK ('T'))                        /* Command Line -T switch */
+    sim_library_unit_tests ();                          /* run library unit tests */
+
 stat = process_stdin_commands (SCPE_BARE_STATUS(stat), argv);
 
 detach_all (0, TRUE);                                   /* close files */
@@ -2816,6 +2825,13 @@ if (DEV_TYPE(dptr) == DEV_ETHER) {
     eth_attach_help (st, dptr, NULL, 0, NULL);
     return;
     }
+#if defined(USE_SIM_CARD) && defined(SIM_CARD_API)
+if (DEV_TYPE(dptr) == DEV_CARD) {
+    fprintf (st, "\n%s device attach commands:\n\n", dptr->name);
+    sim_card_attach_help (st, dptr, NULL, 0, NULL);
+    return;
+    }
+#endif
 if (!silent) {
     fprintf (st, "No ATTACH help is available for the %s device\n", dptr->name);
     if (dptr->help)
@@ -7884,7 +7900,7 @@ signal (SIGTERM, SIG_DFL);                              /* cancel WRU */
 if (sim_log)                                            /* flush console log */
     fflush (sim_log);
 if (sim_deb)                                            /* flush debug log */
-    sim_debug_flush ();
+    _sim_debug_flush ();
 for (i = 1; (dptr = sim_devices[i]) != NULL; i++) {     /* flush attached files */
     for (j = 0; j < dptr->numunits; j++) {              /* if not buffered in mem */
         uptr = dptr->units + j;
@@ -10565,7 +10581,7 @@ return buf;
 t_stat sim_process_event (void)
 {
 UNIT *uptr;
-t_stat reason;
+t_stat reason, bare_reason;
 
 if (stop_cpu) {                                         /* stop CPU? */
     stop_cpu = 0;
@@ -10604,12 +10620,13 @@ do {
             reason = SCPE_OK;
         }
     AIO_EVENT_COMPLETE(uptr, reason);
-    if ((reason != SCPE_OK)     &&  /* Provide context for unexpected errors */
-        (reason != SCPE_STOP)   && 
-        (reason != SCPE_STEP)   && 
-        (reason != SCPE_EXPECT) &&
-        (reason != SCPE_EXIT)   && 
-        (reason != SCPE_REMOTE))
+    bare_reason = SCPE_BARE_STATUS (reason);
+    if ((bare_reason != SCPE_OK)     &&  /* Provide context for unexpected errors */
+        (bare_reason != SCPE_STOP)   && 
+        (bare_reason != SCPE_STEP)   && 
+        (bare_reason != SCPE_EXPECT) &&
+        (bare_reason != SCPE_EXIT)   && 
+        (bare_reason != SCPE_REMOTE))
         reason = sim_messagef (SCPE_IERR, "\nUnexpected internal error while processing event for %s which returned %d - %s\n", sim_uname (uptr), reason, sim_error_text (reason));
     } while ((reason == SCPE_OK) && 
              (sim_interval <= 0) && 
@@ -11825,7 +11842,7 @@ if (exp->buf_size) {
     free (bstr);
     }
 if (exp->dptr && (exp->dbit & exp->dptr->dctrl))
-    fprintf (st, "  Expect Debugging via: SET %s DEBUG%s%s\n", sim_dname(exp->dptr), exp->dptr->debflags ? "=" : "", exp->dptr->debflags ? get_dbg_verb (exp->dbit, exp->dptr, NULL) : "");
+    fprintf (st, "  Expect Debugging via: SET %s DEBUG%s%s\n", sim_dname(exp->dptr), exp->dptr->debflags ? "=" : "", exp->dptr->debflags ? _get_dbg_verb (exp->dbit, exp->dptr, NULL) : "");
 fprintf (st, "  Match Rules:\n");
 if (!*match)
     return sim_exp_showall (st, exp);
@@ -12090,7 +12107,7 @@ if (after)
 if (delay)
     fprintf (st, "  Default delay between character input is %u instructions\n", after);
 if (snd->dptr && (snd->dbit & snd->dptr->dctrl))
-    fprintf (st, "  Send Debugging via: SET %s DEBUG%s%s\n", sim_dname(snd->dptr), snd->dptr->debflags ? "=" : "", snd->dptr->debflags ? get_dbg_verb (snd->dbit, snd->dptr, NULL) : "");
+    fprintf (st, "  Send Debugging via: SET %s DEBUG%s%s\n", sim_dname(snd->dptr), snd->dptr->debflags ? "=" : "", snd->dptr->debflags ? _get_dbg_verb (snd->dbit, snd->dptr, NULL) : "");
 return SCPE_OK;
 }
 
@@ -12161,13 +12178,136 @@ return SCPE_OK;
 
 /* Debug printout routines, from Dave Hittner */
 
-const char* debug_bstates = "01_^";
+const char *debug_bstates = "01_^";
 AIO_TLS char debug_line_prefix[256];
 int32 debug_unterm  = 0;
+char *debug_line_buf_last = NULL;
+size_t debug_line_buf_last_endprefix_offset = 0;
+AIO_TLS char debug_line_last_prefix[256];
+char *debug_line_buf = NULL;
+size_t debug_line_bufsize = 0;
+size_t debug_line_offset = 0;
+size_t debug_line_count = 0;
+
+/*
+ * Optionally filter debug output to summarize duplicate debug lines
+ */
+static void _sim_debug_write_flush (const char *buf, size_t len, t_bool flush)
+{
+char *eol;
+
+if (!(sim_deb_switches & SWMASK ('F'))) {           /* filtering disabled? */
+    if (len > 0)
+        fwrite (buf, 1, len, sim_deb);              /* output now. */
+    return;                                         /* done */
+    }
+if (debug_line_offset + len + 1 > debug_line_bufsize) {
+    debug_line_bufsize += MAX(1024, debug_line_offset + len + 1);
+    debug_line_buf = (char *)realloc (debug_line_buf, debug_line_bufsize);
+    debug_line_buf_last = (char *)realloc (debug_line_buf_last, debug_line_bufsize);
+    }
+memcpy (&debug_line_buf[debug_line_offset], buf, len);
+debug_line_buf[debug_line_offset + len] = '\0';
+debug_line_offset += len;
+while ((eol = strchr (debug_line_buf, '\n')) || flush) {
+    char *endprefix = strstr (debug_line_buf, ")> ");
+    size_t linesize = (eol - debug_line_buf) + 1;
+
+    if ((0 != memcmp ("DBG(", debug_line_buf, 4)) || (endprefix == NULL)) {
+        if (debug_line_count > 0)
+            fwrite (debug_line_buf_last, 1, strlen (debug_line_buf_last), sim_deb);
+        if (debug_line_count > 1) {
+            char countstr[32];
+
+            sprintf (countstr, "same as above (%d time%s)\r\n", (int)(debug_line_count - 1), ((debug_line_count - 1) != 1) ? "s" : "");
+            fwrite (debug_line_last_prefix, 1, strlen (debug_line_last_prefix), sim_deb);
+            fwrite (countstr, 1, strlen (countstr), sim_deb);
+            }
+        if (flush) {
+            linesize = debug_line_offset;
+            flush = FALSE;              /* already flushed */
+            }
+        if (linesize)
+            fwrite (debug_line_buf, 1, linesize, sim_deb);
+        debug_line_count = 0;
+        }
+    else {
+        if (debug_line_count == 0) {
+            debug_line_buf_last_endprefix_offset = endprefix - debug_line_buf;
+            memcpy (debug_line_buf_last, debug_line_buf, linesize);
+            debug_line_buf_last[linesize] = '\0';
+            debug_line_count = 1;
+            }
+        else {
+            if (0 == memcmp (&debug_line_buf[endprefix - debug_line_buf], 
+                             &debug_line_buf_last[debug_line_buf_last_endprefix_offset], 
+                             (eol - endprefix)+ 1)) {
+                ++debug_line_count;
+                memcpy (debug_line_last_prefix, debug_line_buf, (endprefix - debug_line_buf) + 3);
+                debug_line_last_prefix[(endprefix - debug_line_buf) + 3] = '\0';
+                }
+            else {
+                fwrite (debug_line_buf_last, 1, strlen (debug_line_buf_last), sim_deb);
+                if (debug_line_count > 1) {
+                    char countstr[32];
+
+                    sprintf (countstr, "same as above (%d time%s)\r\n", (int)(debug_line_count - 1), ((debug_line_count - 1) != 1) ? "s" : "");
+                    fwrite (debug_line_last_prefix, 1, strlen (debug_line_last_prefix), sim_deb);
+                    fwrite (countstr, 1, strlen (countstr), sim_deb);
+                    }
+                debug_line_buf_last_endprefix_offset = endprefix - debug_line_buf;
+                memcpy (debug_line_buf_last, debug_line_buf, linesize);
+                debug_line_buf_last[linesize] = '\0';
+                debug_line_count = 1;
+                }
+            }
+        }
+    debug_line_offset -= linesize;
+    if (debug_line_offset > 0)
+        memmove (debug_line_buf, eol + 1, debug_line_offset);
+    debug_line_buf[debug_line_offset] = '\0';
+    }
+}
+
+static void _sim_debug_write (const char *buf, size_t len)
+{
+_sim_debug_write_flush (buf, len, FALSE);
+}
+
+static t_stat _sim_debug_flush (void)
+{
+int32 saved_quiet = sim_quiet;
+int32 saved_sim_switches = sim_switches;
+int32 saved_deb_switches = sim_deb_switches;
+struct timespec saved_deb_basetime = sim_deb_basetime;
+char saved_debug_filename[CBUFSIZE];
+
+if (sim_deb == NULL)                                    /* no debug? */
+    return SCPE_OK;
+
+_sim_debug_write_flush ("", 0, TRUE);
+
+if (sim_deb == sim_log) {                               /* debug is log */
+    fflush (sim_deb);                                   /* fflush is the best we can do */
+    return SCPE_OK;
+    }
+
+strcpy (saved_debug_filename, sim_logfile_name (sim_deb, sim_deb_ref));
+
+sim_quiet = 1;
+sim_set_deboff (0, NULL);
+sim_switches = saved_deb_switches;
+sim_set_debon (0, saved_debug_filename);
+sim_deb_basetime = saved_deb_basetime;
+sim_switches = saved_sim_switches;
+sim_quiet = saved_quiet;
+return SCPE_OK;
+}
+
 
 /* Finds debug phrase matching bitmask from from device DEBTAB table */
 
-static const char *get_dbg_verb (uint32 dbits, DEVICE* dptr, UNIT *uptr)
+static const char *_get_dbg_verb (uint32 dbits, DEVICE* dptr, UNIT *uptr)
 {
 static const char *debtab_none    = "DEBTAB_ISNULL";
 static const char *debtab_nomatch = "DEBTAB_NOMATCH";
@@ -12195,7 +12335,7 @@ return some_match ? some_match : debtab_nomatch;
 
 static const char *sim_debug_prefix (uint32 dbits, DEVICE* dptr, UNIT* uptr)
 {
-const char* debug_type = get_dbg_verb (dbits, dptr, uptr);
+const char* debug_type = _get_dbg_verb (dbits, dptr, uptr);
 char tim_t[32] = "";
 char tim_a[32] = "";
 char pc_s[64] = "";
@@ -12356,7 +12496,7 @@ else
 if ((!sim_oline) && (sim_log && (sim_log != stdout)))
     fprintf (sim_log, "%s", buf);
 if (sim_deb && (sim_deb != stdout) && (sim_deb != sim_log))
-    fwrite (buf, 1, strlen (buf), sim_deb);
+    _sim_debug_write (buf, strlen (buf));
 
 if (buf != stackbuf)
     free (buf);
@@ -12507,9 +12647,9 @@ if (sim_deb && dptr && ((dptr->dctrl | (uptr ? uptr->dctrl : 0)) & dbits)) {
             if (i >= j) {
                 if ((i != j) || (i == 0)) {
                     if (!debug_unterm)                  /* print prefix when required */
-                        fwrite (debug_prefix, 1, strlen (debug_prefix), sim_deb);
-                    fwrite (&buf[j], 1, i-j, sim_deb);
-                    fwrite ("\r\n", 1, 2, sim_deb);
+                        _sim_debug_write (debug_prefix, strlen (debug_prefix));
+                    _sim_debug_write (&buf[j], i-j);
+                    _sim_debug_write ("\r\n", 2);
                     }
                 debug_unterm = 0;
                 }
@@ -12518,8 +12658,8 @@ if (sim_deb && dptr && ((dptr->dctrl | (uptr ? uptr->dctrl : 0)) & dbits)) {
         }
     if (i > j) {
         if (!debug_unterm)                          /* print prefix when required */
-            fwrite (debug_prefix, 1, strlen (debug_prefix), sim_deb);
-        fwrite (&buf[j], 1, i-j, sim_deb);
+            _sim_debug_write (debug_prefix, strlen (debug_prefix));
+        _sim_debug_write (&buf[j], i-j);
         }
 
 /* Set unterminated flag for next time */
@@ -12661,7 +12801,7 @@ int Fprintf (FILE *f, const char* fmt, ...)
 int ret = 0;
 va_list args;
 
-if (sim_mfile) {
+if (sim_mfile || (f == sim_deb)) {
     char stackbuf[STACKBUFSIZE];
     int32 bufsize = sizeof(stackbuf);
     char *buf = stackbuf;
@@ -12679,7 +12819,9 @@ if (sim_mfile) {
 #endif                                                  /* NO_vsnprintf */
         va_end (arglist);
 
-/* If the formatted result didn't fit into the buffer, then grow the buffer and try again */
+        /* If the formatted result didn't fit into the buffer, 
+         * then grow the buffer and try again 
+         */
 
         if ((len < 0) || (len >= bufsize-1)) {
             if (buf != stackbuf)
@@ -12696,14 +12838,19 @@ if (sim_mfile) {
         break;
         }
 
-/* Store the formatted data */
+    /* Store the formatted data */
 
-    if (sim_mfile->pos + len > sim_mfile->size) {
-        sim_mfile->size = sim_mfile->pos + 2 * MAX(bufsize, 512);
-        sim_mfile->buf = (char *)realloc (sim_mfile->buf, sim_mfile->size);
+    if (f == sim_deb) {
+        _sim_debug_write (buf, len);
         }
-    memcpy (sim_mfile->buf + sim_mfile->pos, buf, len);
-    sim_mfile->pos += len;
+    else {
+        if (sim_mfile->pos + len > sim_mfile->size) {
+            sim_mfile->size = sim_mfile->pos + 2 * MAX(bufsize, 512);
+            sim_mfile->buf = (char *)realloc (sim_mfile->buf, sim_mfile->size);
+            }
+        memcpy (sim_mfile->buf + sim_mfile->pos, buf, len);
+        sim_mfile->pos += len;
+        }
 
     if (buf != stackbuf)
         free (buf);
@@ -14250,4 +14397,122 @@ if (*stat != SCPE_OK) {
 *value = sim_eval_postfix (postfix, stat);
 delete_Stack (postfix);
 return cptr;
+}
+
+/*
+   Compiled in unit tests for the various device oriented library 
+   modules: sim_card, sim_disk, sim_tape, sim_ether, sim_tmxr, etc.
+ */
+
+static t_stat create_card_file (const char *filename, int cards)
+{
+FILE *f;
+int i;
+
+f = fopen (filename, "w");
+if (f == NULL)
+    return SCPE_OPENERR;
+for (i=0; i<cards; i++)
+    fprintf (f, "%05d ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n", i);
+fclose (f);
+return SCPE_OK;
+}
+
+#define TST(_stat) do { if (SCPE_OK != (stat = (_stat))) {sim_printf ("Error: %d - '%s' processing: " #_stat "\n", stat, sim_error_text(stat)); goto done; }} while (0)
+
+static t_stat test_card (DEVICE *dptr)
+{
+t_stat stat = SCPE_OK;
+#if defined(USE_SIM_CARD) && defined(SIM_CARD_API)
+char cmd[CBUFSIZE];
+char saved_filename[4*CBUFSIZE];
+uint16 card_image[80];
+
+if ((dptr->units->flags & UNIT_RO) == 0)  /* Punch device? */
+    return SCPE_OK;
+
+sim_printf ("Testing %s device sim_card APIs\n", dptr->name);
+
+(void)remove("file1.deck");
+(void)remove("file2.deck");
+(void)remove("file3.deck");
+(void)remove("file4.deck");
+
+TST(create_card_file ("File10.deck", 10));
+TST(create_card_file ("File20.deck", 20));
+TST(create_card_file ("File30.deck", 30));
+TST(create_card_file ("File40.deck", 40));
+
+sprintf (cmd, "%s File10.deck", dptr->name);
+TST(attach_cmd (0, cmd));
+sprintf (cmd, "%s File20.deck", dptr->name);
+TST(attach_cmd (0, cmd));
+sprintf (cmd, "%s -S File30.deck", dptr->name);
+TST(attach_cmd (0, cmd));
+sprintf (cmd, "%s -S -E File40.deck", dptr->name);
+TST(attach_cmd (0, cmd));
+sprintf (saved_filename, "%s %s", dptr->name, dptr->units->filename);
+show_cmd (0, dptr->name);
+sim_printf ("Input Hopper Count:  %d\n", sim_card_input_hopper_count(dptr->units));
+sim_printf ("Output Hopper Count: %d\n", sim_card_output_hopper_count(dptr->units));
+while (!sim_card_eof (dptr->units))
+    TST(sim_read_card (dptr->units, card_image));
+sim_printf ("Input Hopper Count:  %d\n", sim_card_input_hopper_count(dptr->units));
+sim_printf ("Output Hopper Count: %d\n", sim_card_output_hopper_count(dptr->units));
+sim_printf ("Detaching %s\n", dptr->name);
+TST(detach_cmd (0, dptr->name));
+show_cmd (0, dptr->name);
+sim_printf ("Input Hopper Count:  %d\n", sim_card_input_hopper_count(dptr->units));
+sim_printf ("Output Hopper Count: %d\n", sim_card_output_hopper_count(dptr->units));
+sim_printf ("Attaching Saved Filenames: %s\n", saved_filename + strlen(dptr->name));
+TST(attach_cmd (0, saved_filename));
+show_cmd (0, dptr->name);
+sim_printf ("Input Hopper Count:  %d\n", sim_card_input_hopper_count(dptr->units));
+sim_printf ("Output Hopper Count: %d\n", sim_card_output_hopper_count(dptr->units));
+TST(detach_cmd (0, dptr->name));
+done:
+(void)remove ("file10.deck");
+(void)remove ("file20.deck");
+(void)remove ("file30.deck");
+(void)remove ("file40.deck");
+#endif /* defined(USE_SIM_CARD) && defined(SIM_CARD_API) */
+return stat;
+}
+
+static t_stat test_tape (DEVICE *dptr)
+{
+return SCPE_OK;
+}
+
+static t_stat test_disk (DEVICE *dptr)
+{
+return SCPE_OK;
+}
+
+static t_stat test_ether (DEVICE *dptr)
+{
+return SCPE_OK;
+}
+
+
+static t_stat sim_library_unit_tests (void)
+{
+int i;
+DEVICE *dptr;
+t_stat stat = SCPE_OK;
+
+for (i = 0; (dptr = sim_devices[i]) != NULL; i++) {
+    if (DEV_TYPE(dptr) == DEV_CARD)
+        stat = test_card (dptr);
+    else
+        if (DEV_TYPE(dptr) == DEV_TAPE)
+            stat = test_tape (dptr);
+        else
+            if (DEV_TYPE(dptr) == DEV_DISK)
+                stat = test_disk (dptr);
+        else
+            if (DEV_TYPE(dptr) == DEV_ETHER)
+                stat = test_ether (dptr);
+    }
+return stat;
 }
