@@ -576,6 +576,10 @@ FILEREF *sim_log_ref = NULL;                            /* log file file referen
 FILE *sim_deb = NULL;                                   /* debug file */
 FILEREF *sim_deb_ref = NULL;                            /* debug file file reference */
 int32 sim_deb_switches = 0;                             /* debug switches */
+size_t sim_deb_buffer_size = 0;                         /* debug memory buffer size */
+char *sim_deb_buffer = NULL;                            /* debug memory buffer */
+size_t sim_debug_buffer_offset = 0;                     /* debug memory buffer insertion offset */
+size_t sim_debug_buffer_inuse = 0;                      /* debug memory buffer inuse count */
 struct timespec sim_deb_basetime;                       /* debug timestamp relative base time */
 char *sim_prompt = NULL;                                /* prompt string */
 static FILE *sim_gotofile;                              /* the currently open do file */
@@ -1224,6 +1228,13 @@ static const char simh_help[] =
       "5-E\n"
       " The -E switch causes data blob output to also display the data as\n"
       " EBCDIC characters.\n"
+      "5-B\n"
+      " The -B switch causes debug data output to be written to a circular\n"
+      " buffer in memory.   This avoids the potential delays for disk I/O to\n"
+      " and the disk storage that a long running debug might consume.\n"
+      " The size of the circular memory buffer that is used is specified on\n"
+      " the SET DEBUG command line, for example:\n\n"
+      "++SET DEBUG -B <sizeinMB> <debug-destination>\n\n"
 #define HLP_SET_BREAK  "*Commands SET Breakpoints"
       "3Breakpoints\n"
       "+SET BREAK <list>            set breakpoints\n"
@@ -1255,7 +1266,7 @@ static const char simh_help[] =
       " running in the simulator is doing nothing, and runs the simulator at full\n"
       " speed when there is work to do.  Throttling and idling are mutually\n"
       " exclusive.\n"
-#define HLP_SET_CLOCKS "*Commands SET Clocks"
+#define HLP_SET_CLOCK "*Commands SET Clock"
       "3Clock\n"
 #if defined (SIM_ASYNCH_CLOCKS)
       "+SET CLOCK asynch            enable asynchronous clocks\n"
@@ -1264,6 +1275,7 @@ static const char simh_help[] =
       "+SET CLOCK nocatchup         disable catchup clock ticks\n"
       "+SET CLOCK catchup           enable catchup clock ticks\n"
       "+SET CLOCK calib=n%%          specify idle calibration skip %%\n"
+      "+SET CLOCK calib=ALWAYS      specify calibration independent of idle\n"
       "+SET CLOCK stop=n            stop execution after n instructions\n\n"
       " The SET CLOCK STOP command allows execution to have a bound when\n"
       " execution starts with a BOOT, NEXT or CONTINUE command.\n"
@@ -2302,7 +2314,7 @@ static CTAB set_glob_tab[] = {
     { "NODEBUG",    &sim_set_deboff,            0, HLP_SET_DEBUG  },
     { "THROTTLE",   &sim_set_throt,             1, HLP_SET_THROTTLE },
     { "NOTHROTTLE", &sim_set_throt,             0, HLP_SET_THROTTLE },
-    { "CLOCKS",     &sim_set_timers,            1, HLP_SET_CLOCKS },
+    { "CLOCKS",     &sim_set_timers,            1, HLP_SET_CLOCK },
     { "ASYNCH",     &sim_set_asynch,            1, HLP_SET_ASYNCH },
     { "NOASYNCH",   &sim_set_asynch,            0, HLP_SET_ASYNCH },
     { "ENVIRONMENT", &sim_set_environment,      1, HLP_SET_ENVIRON },
@@ -2521,6 +2533,11 @@ if (!sim_quiet) {
     show_version (stdout, NULL, NULL, 0, NULL);
     }
 show_version (stdnul, NULL, NULL, 1, NULL);             /* Quietly set SIM_OSTYPE */
+#if defined (HAVE_PCREPOSIX_H)
+setenv ("SIM_REGEX_TYPE", "PCREPOSIX", 1);              /* Publish regex type */
+#elif defined (HAVE_REGEX_H)
+setenv ("SIM_REGEX_TYPE", "REGEX", 1);                  /* Publish regex type */
+#endif
 if (((sim_dflt_dev->flags & DEV_DEBUG) == 0) &&         /* default device without debug? */
     (sim_dflt_dev->debflags == NULL)) {
     sim_dflt_dev->flags |= DEV_DEBUG;                   /* connect default event debugging */
@@ -2783,7 +2800,6 @@ for (i=0; i<cmd_cnt; ++i) {
     }
 free (hlp_cmdp);
 fprintf (st, "\n");
-return;
 }
 
 static void fprint_header (FILE *st, t_bool *pdone, char *context)
@@ -3496,8 +3512,10 @@ if (flag >= 0) {                                        /* Only bump nesting fro
     }
 
 sim_debug (SIM_DBG_DO, sim_dflt_dev, "do_cmd_label(%d, flag=%d, '%s', '%s')\n", sim_do_depth, flag, fcptr, label ? label : "");
-if (NULL == (c = sim_filepath_parts (cbuf, "f")))
-    return SCPE_MEM;
+if (NULL == (c = sim_filepath_parts (cbuf, "f"))) {
+    stat = SCPE_MEM;
+    goto Cleanup_Return;
+    }
 strlcpy( sim_do_filename[sim_do_depth], c, 
          sizeof (sim_do_filename[sim_do_depth]));       /* stash away full path of do file name for possible use by 'call' command */
 free (c);
@@ -4182,7 +4200,6 @@ for (; *ip && (op < oend); ) {
 sim_sub_instr_off[outstr_off] = 0;
 strcpy (instr, tmpbuf);
 free (tmpbuf);
-return;
 }
 
 t_stat shift_args (char *do_arg[], size_t arg_count)
@@ -5634,17 +5651,28 @@ fprintf (st, "%s", sprint_capac (dptr, uptr));
 t_stat show_version (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, CONST char *cptr)
 {
 int32 vmaj = SIM_MAJOR, vmin = SIM_MINOR, vpat = SIM_PATCH, vdelt = SIM_DELTA;
+char vmaj_s[12], vmin_s[12], vpat_s[12], vdelt_s[12];
 const char *cpp = "";
 const char *build = "";
 const char *arch = "";
 
 if (cptr && (*cptr != 0))
     return SCPE_2MARG;
+sprintf (vmaj_s, "%d", vmaj);
+setenv ("SIM_MAJOR", vmaj_s, 1);
+sprintf (vmin_s, "%d", vmin);
+setenv ("SIM_MINOR", vmin_s, 1);
+sprintf (vpat_s, "%d", vpat);
+setenv ("SIM_PATCH", vpat_s, 1);
 fprintf (st, "%s simulator V%d.%d-%d", sim_name, vmaj, vmin, vpat);
-if (vdelt)
+if (vdelt) {
+    sprintf (vdelt_s, "%d", vdelt);
+    setenv ("SIM_DELTA", vdelt_s, 1);
     fprintf (st, " delta %d", vdelt);
+    }
 #if defined (SIM_VERSION_MODE)
 fprintf (st, " %s", SIM_VERSION_MODE);
+setenv ("SIM_VERSION_MODE", SIM_VERSION_MODE, 1);
 #endif
 if (flag) {
     t_bool idle_capable;
@@ -5814,7 +5842,9 @@ if (flag) {
 #define S_xstr(a) S_str(a)
 #define S_str(a) #a
 fprintf (st, "%sgit commit id: %8.8s", flag ? "\n        " : "        ", S_xstr(SIM_GIT_COMMIT_ID));
+setenv ("SIM_GIT_COMMIT_ID", S_xstr(SIM_GIT_COMMIT_ID), 1);
 #if defined(SIM_GIT_COMMIT_TIME)
+setenv ("SIM_GIT_COMMIT_TIME", S_xstr(SIM_GIT_COMMIT_TIME), 1);
 if (flag)
     fprintf (st, "%sgit commit time: %s", "\n        ", S_xstr(SIM_GIT_COMMIT_TIME));
 #endif
@@ -6184,156 +6214,6 @@ t_stat pwd_cmd (int32 flg, CONST char *cptr)
 return show_cmd (0, "DEFAULT");
 }
 
-#if defined (_WIN32)
-
-t_stat sim_dir_scan (const char *cptr, DIR_ENTRY_CALLBACK entry, void *context)
-{
-HANDLE hFind;
-WIN32_FIND_DATAA File;
-struct stat filestat;
-char WildName[PATH_MAX + 1];
-
-strlcpy (WildName, cptr, sizeof(WildName));
-cptr = WildName;
-sim_trim_endspc (WildName);
-if ((hFind =  FindFirstFileA (cptr, &File)) != INVALID_HANDLE_VALUE) {
-    t_int64 FileSize;
-    char DirName[PATH_MAX + 1], FileName[PATH_MAX + 1];
-    char *c;
-    const char *backslash = strchr (cptr, '\\');
-    const char *slash = strchr (cptr, '/');
-    const char *pathsep = (backslash && slash) ? MIN (backslash, slash) : (backslash ? backslash : slash);
-
-    GetFullPathNameA(cptr, sizeof(DirName), DirName, (char **)&c);
-    c = strrchr (DirName, '\\');
-    *c = '\0';                                  /* Truncate to just directory path */
-    if (!pathsep || (!strcmp (slash, "/*")))    /* Separator wasn't mentioned? */
-        pathsep = "\\";                         /* Default to Windows backslash */
-    if (*pathsep == '/') {                      /* If slash separator? */
-        while ((c = strchr (DirName, '\\')))
-            *c = '/';                           /* Convert backslash to slash */
-        }
-    sprintf (&DirName[strlen (DirName)], "%c", *pathsep);
-    do {
-        FileSize = (((t_int64)(File.nFileSizeHigh)) << 32) | File.nFileSizeLow;
-        sprintf (FileName, "%s%s", DirName, File.cFileName);
-        stat (FileName, &filestat);
-        entry (DirName, File.cFileName, FileSize, &filestat, context);
-        } while (FindNextFile (hFind, &File));
-    FindClose (hFind);
-    }
-else
-    return SCPE_ARG;
-return SCPE_OK;
-}
-
-#else /* !defined (_WIN32) */
-
-#if defined (HAVE_GLOB)
-#include <glob.h>
-#else /* !defined (HAVE_GLOB) */
-#include <dirent.h>
-#if defined (HAVE_FNMATCH)
-#include <fnmatch.h>
-#endif
-#endif /* defined (HAVE_GLOB) */
-
-t_stat sim_dir_scan (const char *cptr, DIR_ENTRY_CALLBACK entry, void *context)
-{
-#if defined (HAVE_GLOB)
-glob_t  paths;
-#else
-DIR *dir;
-#endif
-struct stat filestat;
-char *c;
-char DirName[PATH_MAX + 1], WholeName[PATH_MAX + 1], WildName[PATH_MAX + 1];
-
-memset (DirName, 0, sizeof(DirName));
-memset (WholeName, 0, sizeof(WholeName));
-strlcpy (WildName, cptr, sizeof(WildName));
-cptr = WildName;
-sim_trim_endspc (WildName);
-if ((*cptr != '/') || (0 == memcmp (cptr, "./", 2)) || (0 == memcmp (cptr, "../", 3))) {
-    sim_getcwd (WholeName, sizeof (WholeName)-1);
-    strlcat (WholeName, "/", sizeof (WholeName));
-    strlcat (WholeName, cptr, sizeof (WholeName));
-    sim_trim_endspc (WholeName);
-    }
-else
-    strlcpy (WholeName, cptr, sizeof (WholeName));
-while ((c = strstr (WholeName, "/./")))
-    memmove (c + 1, c + 3, 1 + strlen (c + 3));
-while ((c = strstr (WholeName, "//")))
-    memmove (c + 1, c + 2, 1 + strlen (c + 2));
-while ((c = strstr (WholeName, "/../"))) {
-    char *c1;
-    c1 = c - 1;
-    while ((c1 >= WholeName) && (*c1 != '/'))
-        c1 = c1 - 1;
-    memmove (c1, c + 3, 1 + strlen (c + 3));
-    while (0 == memcmp (WholeName, "/../", 4))
-        memmove (WholeName, WholeName+3, 1 + strlen (WholeName+3));
-    }
-c = strrchr (WholeName, '/');
-if (c) {
-    memmove (DirName, WholeName, 1+c-WholeName);
-    DirName[1+c-WholeName] = '\0';
-    }
-else {
-    sim_getcwd (WholeName, sizeof (WholeName)-1);
-    }
-cptr = WholeName;
-#if defined (HAVE_GLOB)
-memset (&paths, 0, sizeof (paths));
-if (0 == glob (cptr, 0, NULL, &paths)) {
-#else
-dir = opendir(DirName[0] ? DirName : "/.");
-if (dir) {
-    struct dirent *ent;
-#endif
-    t_offset FileSize;
-    char FileName[PATH_MAX + 1];
-    const char *MatchName = 1 + strrchr (cptr, '/');
-    char *p_name;
-    struct tm *local;
-#if defined (HAVE_GLOB)
-    size_t i;
-#endif
-
-#if defined (HAVE_GLOB)
-    for (i=0; i<paths.gl_pathc; i++) {
-        sprintf (FileName, "%s", paths.gl_pathv[i]);
-#else
-    while ((ent = readdir (dir))) {
-#if defined (HAVE_FNMATCH)
-        if (fnmatch(MatchName, ent->d_name, 0))
-            continue;
-#else
-        /* only match exact name without fnmatch support */
-        if (strcmp(MatchName, ent->d_name) != 0)
-            continue;
-#endif
-        sprintf (FileName, "%s%s", DirName, ent->d_name);
-#endif
-        p_name = FileName + strlen (DirName);
-        memset (&filestat, 0, sizeof (filestat));
-        (void)stat (FileName, &filestat);
-        FileSize = (t_offset)((filestat.st_mode & S_IFDIR) ? 0 : sim_fsize_name_ex (FileName));
-        entry (DirName, p_name, FileSize, &filestat, context);
-        }
-#if defined (HAVE_GLOB)
-    globfree (&paths);
-#else
-    closedir (dir);
-#endif
-    }
-else
-    return SCPE_ARG;
-return SCPE_OK;
-}
-#endif /* !defined(_WIN32) */
-
 typedef struct {
     char LastDir[PATH_MAX + 1];
     t_offset TotalBytes;
@@ -6404,24 +6284,31 @@ t_stat dir_cmd (int32 flg, CONST char *cptr)
 DIR_CTX dir_state;
 t_stat r;
 char WildName[PATH_MAX + 1];
-
+struct stat filestat;
 
 memset (&dir_state, 0, sizeof (dir_state));
 strlcpy (WildName, cptr, sizeof(WildName));
 cptr = WildName;
 sim_trim_endspc (WildName);
 if (*cptr == '\0')
-    cptr = "./*";
+    strlcpy (WildName, ".", sizeof (WildName));
 else {
-    struct stat filestat;
-
-    if ((!stat (WildName, &filestat)) && (filestat.st_mode & S_IFDIR))
-        strlcat (WildName, "/*", sizeof (WildName));
+    if ((WildName[strlen (WildName) - 1] == '/') ||
+        (WildName[strlen (WildName) - 1] == '\\'))
+        WildName[strlen (WildName) - 1] = '\0';
     }
+if ((!stat (WildName, &filestat)) && (filestat.st_mode & S_IFDIR))
+    strlcat (WildName, "/*", sizeof (WildName));
 r = sim_dir_scan (cptr, sim_dir_entry, &dir_state);
 sim_dir_entry (NULL, NULL, 0, NULL, &dir_state);    /* output summary */
-if (r != SCPE_OK)
-    return sim_messagef (SCPE_ARG, "File Not Found\n");
+if (r != SCPE_OK) {
+    char *cp = sim_filepath_parts (WildName, "p");
+
+    sim_printf ("\n Directory of %s\n\n", cp);
+    sim_printf ("File Not Found\n\n");
+    free (cp);
+    return SCPE_OK;
+    }
 return r;
 }
 
@@ -7855,9 +7742,8 @@ else if ((flag == RU_STEP) ||
         if ((r != SCPE_OK) || (sim_step <= 0))          /* error? */
             return SCPE_ARG;
         }
-    else sim_step = 1;
-    if ((flag == RU_STEP) && (sim_switches & SWMASK ('T')))
-        sim_step = (int32)((sim_timer_inst_per_sec ()*sim_step)/1000000.0);
+    else
+        sim_step = 1;
     }
 else if (flag == RU_NEXT) {                             /* next */
     t_addr *addrs;
@@ -7945,10 +7831,14 @@ if (signal (SIGTERM, int_handler) == SIG_ERR) {         /* set WRU */
     sim_ttcmd ();
     return r;
     }
+if (sim_step) {                                         /* set step timer */
+    if (sim_switches & SWMASK ('T'))                    /* stepping for elapsed time? */
+        sim_activate_after (&sim_step_unit, (uint32)sim_step);/* wall clock based step */
+    else
+        sim_activate (&sim_step_unit, sim_step);        /* instruction based step */
+    }
 stop_cpu = FALSE;
 sim_is_running = TRUE;                                  /* flag running */
-if (sim_step)                                           /* set step timer */
-    sim_activate (&sim_step_unit, sim_step);
 fflush(stdout);                                         /* flush stdout */
 if (sim_log)                                            /* flush log if enabled */
     fflush (sim_log);
@@ -8137,7 +8027,6 @@ fprintf (st, "\n");
 void fprint_stopped (FILE *st, t_stat v)
 {
 fprint_stopped_gen (st, v, sim_PC, sim_dflt_dev);
-return;
 }
 
 /* Unit service for step timeout, originally scheduled by STEP n command
@@ -8168,7 +8057,6 @@ return sim_cancel (&sim_step_unit);
 void int_handler (int sig)
 {
 stop_cpu = TRUE;
-return;
 }
 
 /* Examine/deposit commands
@@ -10861,7 +10749,7 @@ else
 
 t_stat sim_activate_after_abs (UNIT *uptr, uint32 usec_delay)
 {
-return _sim_activate_after_abs (uptr, usec_delay);
+return _sim_activate_after_abs (uptr, (double)usec_delay);
 }
 
 t_stat sim_activate_after_abs_d (UNIT *uptr, double usec_delay)
@@ -11776,6 +11664,10 @@ for (i=0; i<exp->size; i++) {
     free (exp->rules[i].match);                         /* deallocate match string */
     free (exp->rules[i].match_pattern);                 /* deallocate display format match string */
     free (exp->rules[i].act);                           /* deallocate action */
+#if defined(USE_REGEX)
+    if (exp->rules[i].switches & EXP_TYP_REGEX)
+        regfree (&exp->rules[i].regex);                               /* release compiled regex */
+#endif
     }
 free (exp->rules);
 exp->rules = NULL;
@@ -12301,6 +12193,33 @@ size_t debug_line_bufsize = 0;
 size_t debug_line_offset = 0;
 size_t debug_line_count = 0;
 
+static void _debug_fwrite (const char *buf, size_t len)
+{
+size_t move_size;
+
+if (sim_deb_buffer == NULL) {
+    fwrite (buf, 1, len, sim_deb);              /* output now. */
+    return;
+    }
+if ((sim_deb == stdout) && (!sim_is_running))
+    fwrite (buf, 1, len, stdout);               /* output now. */
+while (len > 0) {
+    if (sim_debug_buffer_offset + len <= sim_deb_buffer_size)
+        move_size = len;
+    else
+        move_size = sim_deb_buffer_size - sim_debug_buffer_offset;
+    memcpy (sim_deb_buffer + sim_debug_buffer_offset, buf, move_size);
+    sim_debug_buffer_offset += move_size;
+    if (sim_debug_buffer_offset == sim_deb_buffer_size) {
+        sim_debug_buffer_offset = 0;
+        sim_debug_buffer_inuse = sim_deb_buffer_size;
+        }
+    if (sim_debug_buffer_inuse < sim_deb_buffer_size)
+        sim_debug_buffer_inuse += move_size;
+    len -= move_size;
+    }
+}
+
 /*
  * Optionally filter debug output to summarize duplicate debug lines
  */
@@ -12310,7 +12229,7 @@ char *eol;
 
 if (sim_deb_switches & SWMASK ('F')) {              /* filtering disabled? */
     if (len > 0)
-        fwrite (buf, 1, len, sim_deb);              /* output now. */
+        _debug_fwrite (buf, len);                   /* output now. */
     return;                                         /* done */
     }
 if (debug_line_offset + len + 1 > debug_line_bufsize) {
@@ -12327,20 +12246,20 @@ while ((eol = strchr (debug_line_buf, '\n')) || flush) {
 
     if ((0 != memcmp ("DBG(", debug_line_buf, 4)) || (endprefix == NULL)) {
         if (debug_line_count > 0)
-            fwrite (debug_line_buf_last, 1, strlen (debug_line_buf_last), sim_deb);
+            _debug_fwrite (debug_line_buf_last, strlen (debug_line_buf_last));
         if (debug_line_count > 1) {
             char countstr[32];
 
             sprintf (countstr, "same as above (%d time%s)\r\n", (int)(debug_line_count - 1), ((debug_line_count - 1) != 1) ? "s" : "");
-            fwrite (debug_line_last_prefix, 1, strlen (debug_line_last_prefix), sim_deb);
-            fwrite (countstr, 1, strlen (countstr), sim_deb);
+            _debug_fwrite (debug_line_last_prefix, strlen (debug_line_last_prefix));
+            _debug_fwrite (countstr, strlen (countstr));
             }
         if (flush) {
             linesize = debug_line_offset;
             flush = FALSE;              /* already flushed */
             }
         if (linesize)
-            fwrite (debug_line_buf, 1, linesize, sim_deb);
+            _debug_fwrite  (debug_line_buf, linesize);
         debug_line_count = 0;
         }
     else {
@@ -12359,13 +12278,13 @@ while ((eol = strchr (debug_line_buf, '\n')) || flush) {
                 debug_line_last_prefix[(endprefix - debug_line_buf) + 3] = '\0';
                 }
             else {
-                fwrite (debug_line_buf_last, 1, strlen (debug_line_buf_last), sim_deb);
+                _debug_fwrite (debug_line_buf_last, strlen (debug_line_buf_last));
                 if (debug_line_count > 1) {
                     char countstr[32];
 
                     sprintf (countstr, "same as above (%d time%s)\r\n", (int)(debug_line_count - 1), ((debug_line_count - 1) != 1) ? "s" : "");
-                    fwrite (debug_line_last_prefix, 1, strlen (debug_line_last_prefix), sim_deb);
-                    fwrite (countstr, 1, strlen (countstr), sim_deb);
+                    _debug_fwrite (debug_line_last_prefix, strlen (debug_line_last_prefix));
+                    _debug_fwrite (countstr, strlen (countstr));
                     }
                 debug_line_buf_last_endprefix_offset = endprefix - debug_line_buf;
                 memcpy (debug_line_buf_last, debug_line_buf, linesize);
@@ -12404,15 +12323,17 @@ if (sim_deb == sim_log) {                               /* debug is log */
     return SCPE_OK;
     }
 
-strcpy (saved_debug_filename, sim_logfile_name (sim_deb, sim_deb_ref));
+if (!(saved_deb_switches & SWMASK ('B'))) {
+    strcpy (saved_debug_filename, sim_logfile_name (sim_deb, sim_deb_ref));
 
-sim_quiet = 1;
-sim_set_deboff (0, NULL);
-sim_switches = saved_deb_switches;
-sim_set_debon (0, saved_debug_filename);
-sim_deb_basetime = saved_deb_basetime;
-sim_switches = saved_sim_switches;
-sim_quiet = saved_quiet;
+    sim_quiet = 1;
+    sim_set_deboff (0, NULL);
+    sim_switches = saved_deb_switches;
+    sim_set_debon (0, saved_debug_filename);
+    sim_deb_basetime = saved_deb_basetime;
+    sim_switches = saved_sim_switches;
+    sim_quiet = saved_quiet;
+    }
 return SCPE_OK;
 }
 
@@ -13040,7 +12961,6 @@ topic->text = newt;
 memcpy (newt + topic->len, text, len);
 topic->len +=len;
 newt[topic->len] = '\0';
-return;
 }
 
 /* Release memory held by a topic and its children.
@@ -13059,7 +12979,6 @@ for (i = 0; i < topic->kids; i++) {
     free (child);
     }
 free (topic->children);
-return;
 }
 
 /* Build a help tree from a string.
@@ -13414,7 +13333,6 @@ fclose (tmp);
 remove (tmpnam);
 free (tmpnam);
 #endif
-return;
 }
 /* Flatten and display help for those who say they prefer it.
  */
