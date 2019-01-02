@@ -5336,6 +5336,7 @@ int32 flag = flags & 1;
 t_bool uflag = ((flags & 2) != 0);
 char gbuf[CBUFSIZE];
 DEBTAB *dep;
+t_stat r = SCPE_OK;
 
 if ((dptr->flags & DEV_DEBUG) == 0)
     return SCPE_NOFNC;
@@ -5354,7 +5355,7 @@ if (cptr == NULL) {                                     /* no arguments? */
     return SCPE_OK;
     }
 if (dptr->debflags == NULL)                             /* must have table */
-    return SCPE_ARG;
+    return sim_messagef (SCPE_ARG, "The %s device doesn't have DEBUG options.\n", dptr->name);
 while (*cptr) {
     cptr = get_glyph (cptr, gbuf, ';');                 /* get debug flag */
     for (dep = dptr->debflags; dep->name != NULL; dep++) {
@@ -5373,9 +5374,9 @@ while (*cptr) {
             }
         }                                               /* end for */
     if (dep->mask == 0)                                 /* no match? */
-        return SCPE_ARG;
+        r = sim_messagef (SCPE_ARG, "Invalid DEBUG option '%s' for %s device\n", gbuf, dptr->name);
     }                                                   /* end while */
-return SCPE_OK;
+return r;
 }
 
 /* Show command */
@@ -7222,6 +7223,7 @@ for (i = 0; i < (device_count + sim_internal_device_count); i++) {/* loop thru d
         WRITE_I (uptr->buf);
         WRITE_I (uptr->capac);                          /* [V3.5] capacity */
         fprintf (sfile, "%.0f\n", uptr->usecs_remaining);/* [V4.0] remaining wait */
+        WRITE_I (uptr->pos);
         if (uptr->flags & UNIT_ATT) {
             fputs (uptr->filename, sfile);
             if ((uptr->flags & UNIT_BUF) &&             /* writable buffered */
@@ -7477,6 +7479,7 @@ for ( ;; ) {                                            /* device loop */
         if (v40) {
             READ_S (buf);
             sscanf (buf, "%lf", &uptr->usecs_remaining);
+            READ_I (uptr->pos);
             }
         if (!v32)
             flg = ((flg & UNIT_UFMASK_31) << (UNIT_V_UF - UNIT_V_UF_31)) |
@@ -12873,18 +12876,19 @@ if (sim_mfile || (f == sim_deb)) {
         break;
         }
 
-    /* Store the formatted data */
+    /* Store the formatted data with priority to a 
+       memory file vs debug de-duplication*/
 
-    if (f == sim_deb) {
-        _sim_debug_write (buf, len);
-        }
-    else {
+    if (sim_mfile) {
         if (sim_mfile->pos + len > sim_mfile->size) {
             sim_mfile->size = sim_mfile->pos + 2 * MAX(bufsize, 512);
             sim_mfile->buf = (char *)realloc (sim_mfile->buf, sim_mfile->size);
             }
         memcpy (sim_mfile->buf + sim_mfile->pos, buf, len);
         sim_mfile->pos += len;
+        }
+    else {
+        _sim_debug_write (buf, len);
         }
 
     if (buf != stackbuf)
