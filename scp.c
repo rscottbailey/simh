@@ -737,7 +737,6 @@ const struct scp_error {
          {"STALL",   "Console Telnet output stall"},
          {"AFAIL",   "Assertion failed"},
          {"INVREM",  "Invalid remote console command"},
-         {"NOTATT",  "Not attached"},
          {"EXPECT",  "Expect matched"},
          {"AMBREG",  "Ambiguous register name"},
          {"REMOTE",  "remote console command"},
@@ -1754,8 +1753,6 @@ static const char simh_help[] =
       " Assertion failed\n"
       "5 INVREM\n"
       " Invalid remote console command\n"
-      "5 NOTATT\n"
-      " Not attached \n"
       "5 AMBREG\n"
       " Ambiguous register\n"
 #define HLP_SHIFT       "*Commands Executing_Command_Files SHIFT"
@@ -1798,7 +1795,7 @@ static const char simh_help[] =
       "++NOPARAM, ALATT, TIMER, SIGERR, TTYERR, SUB, NOFNC, UDIS,\n"
       "++NORO, INVSW, MISVAL, 2FARG, 2MARG, NXDEV, NXUN, NXREG,\n"
       "++NXPAR, NEST, IERR, MTRLNT, LOST, TTMO, STALL, AFAIL,\n"
-      "++NOTATT, AMBREG\n\n"
+      "++AMBREG\n\n"
       " These values can be indicated by name or by their internal\n"
       " numeric value (not recommended).\n"
       /***************** 80 character line width template *************************/
@@ -3208,7 +3205,7 @@ return SCPE_OK;
 
 t_stat help_cmd (int32 flag, CONST char *cptr)
 {
-char gbuf[CBUFSIZE];
+char gbuf[CBUFSIZE], gbuf2[CBUFSIZE];
 CTAB *cmdp;
 
 GET_SWITCHES (cptr);                                    /* get switches */
@@ -3247,8 +3244,6 @@ if (*cptr) {
                     }
                 return SCPE_ARG;
                 }
-            else
-                return SCPE_2MARG;
             }
         if (cmdp->help) {
             if (strcmp (cmdp->name, "HELP") == 0) {
@@ -3288,7 +3283,12 @@ if (*cptr) {
                             sim_dflt_dev->help (sim_log, sim_dflt_dev, sim_dflt_dev->units, 0, cmdp->name);
                     }
                 }
-            help_cmd_output (flag, cmdp->help, cmdp->help_base);
+            strlcpy (gbuf2, cmdp->help, sizeof (gbuf2));
+            if (*cptr) {
+                strlcat (gbuf2, " ", sizeof (gbuf2));
+                strlcat (gbuf2, cptr, sizeof (gbuf2));
+                }
+            help_cmd_output (flag, gbuf2, cmdp->help_base);
             }
         else { /* no help so it is likely a command alias */
             CTAB *cmdpa;
@@ -3307,14 +3307,18 @@ if (*cptr) {
         DEVICE *dptr;
         UNIT *uptr;
         t_stat r;
+        t_bool explicit_device = FALSE;
 
-        if (0 == strcmp (gbuf, "DEVICE"))
+        if (0 == strcmp (gbuf, "DEVICE")) {
+            explicit_device = TRUE;
             cptr = get_glyph (cptr, gbuf, 0);
+            }
         dptr = find_unit (gbuf, &uptr);
         if (dptr == NULL) {
             dptr = find_dev (gbuf);
             if (dptr == NULL)
-                return SCPE_ARG;
+                return sim_messagef (SCPE_ARG, "No HELP available for %s%s %s\n", 
+                                               explicit_device ? "DEVICE " : "", gbuf, cptr);
             if (dptr->flags & DEV_DISABLE)
                 sim_printf ("Device %s is currently disabled\n", dptr->name);
             }
@@ -5087,10 +5091,14 @@ if (sim_switches & SWMASK ('P')) {
     if (prompt[0] == '\0')
         return sim_messagef (SCPE_2FARG, "Missing Prompt and Environment Variable Name\n");
     if ((prompt[0] == '"') || (prompt[0] == '\'')) {
+        if (strlen (prompt) < 3)
+            return sim_messagef (SCPE_ARG, "Invalid Prompt\n");
         prompt[strlen (prompt) - 1] = '\0';
         memmove (prompt, prompt + 1, strlen (prompt));
         }
     deflt = get_glyph (cptr, varname, '=');             /* get environment variable name */
+    if (varname[0] == '\0')
+        return sim_messagef (SCPE_2FARG, "Missing Environment Variable Name\n");
     if (deflt == NULL)
         deflt = "";
     if (*deflt) {
@@ -7024,7 +7032,7 @@ if (!(uptr->flags & UNIT_ATT)) {                        /* not attached? */
     if (sim_switches & SIM_SW_REST)                     /* restoring? */
         return SCPE_OK;                                 /* allow detach */
     else
-        return SCPE_NOTATT;                             /* complain */
+        return SCPE_UNATT;                              /* complain */
     }
 if ((dptr = find_dev_from_unit (uptr)) == NULL)
     return SCPE_OK;
@@ -13605,8 +13613,12 @@ while (TRUE) {
         free (pstring);
         }
 
-    if (!cptr)                              /* EOF, exit help */
+    if (!cptr) {                            /* EOF, exit help */
+#if !defined(_WIN32)
+        printf ("\n");
+#endif
         break;
+        }
 
     cptr = get_glyph (cptr, gbuf, 0);
     if (!strcmp (gbuf, "*")) {              /* Wildcard */
@@ -14473,24 +14485,28 @@ DEVICE *dptr;
 t_stat stat = SCPE_OK;
 
 for (i = 0; (dptr = sim_devices[i]) != NULL; i++) {
+    t_stat tstat = SCPE_OK;
+
     switch (DEV_TYPE(dptr)) {
 #if defined(USE_SIM_CARD)
         case DEV_CARD:
-            stat = sim_card_test (dptr);
+            tstat = sim_card_test (dptr);
             break;
 #endif
         case DEV_DISK:
-            stat = sim_disk_test (dptr);
+            tstat = sim_disk_test (dptr);
             break;
         case DEV_ETHER:
-            stat = sim_ether_test (dptr);
+            tstat = sim_ether_test (dptr);
             break;
         case DEV_TAPE:
-            stat = sim_tape_test (dptr);
+            tstat = sim_tape_test (dptr);
             break;
         default:
             break;
         }
+    if (tstat != SCPE_OK)
+        stat = tstat;
     }
 return stat;
 }
