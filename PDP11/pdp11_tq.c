@@ -502,8 +502,8 @@ MTAB tq_mod[] = {
         NULL, &tq_show_ctrl, NULL, "Display complete controller state" },
     { MTAB_XTD|MTAB_VUN|MTAB_NMO, 0,        "UNITQ", NULL,
         NULL, &tq_show_unitq, NULL, "Display unit queue" },
-    { MTAB_XTD|MTAB_VUN|MTAB_VALR, 0,       "FORMAT", "FORMAT",
-        &sim_tape_set_fmt, &sim_tape_show_fmt, NULL, "Set/Display tape format (SIMH, E11, TPC, P7B)" },
+    { MTAB_XTD|MTAB_VUN|MTAB_VALR, 0, "FORMAT", "FORMAT",
+        &sim_tape_set_fmt, &sim_tape_show_fmt, NULL, "Set/Display tape format (SIMH, E11, TPC, P7B, AWS, TAR)" },
     { MTAB_XTD|MTAB_VUN|MTAB_VALR, 0,       "CAPACITY", "CAPACITY",
         &sim_tape_set_capac, &sim_tape_show_capac, NULL, "Set/Display capacity" },
 #if defined (VM_PDP11)
@@ -2004,7 +2004,7 @@ void tq_ring_int (struct uq_ring *ring)
 uint32 iadr = tq_comm + ring->ioff;                     /* addr intr wd */
 uint16 flag = 1;
 
-Map_WriteW (iadr, 2, &flag);                            /* write flag */
+(void)Map_WriteW (iadr, 2, &flag);                      /* write flag */
 if (tq_dib.vec)                                         /* if enb, intr */
     SET_INT (TQ);
 return;
