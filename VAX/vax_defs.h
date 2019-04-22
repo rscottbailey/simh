@@ -817,6 +817,7 @@ extern int32 pcq_p;                                     /* PC queue ptr */
 extern int32 in_ie;                                     /* in exc, int */
 extern int32 ibcnt, ppc;                                /* prefetch ctl */
 extern int32 hlt_pin;                                   /* HLT pin intr */
+extern int32 mxpr_cc_vc;                                /* cc V & C bits from mtpr/mfpr operations */
 extern int32 mem_err;
 extern int32 crd_err;
 
@@ -908,10 +909,22 @@ extern void rom_wr_B (int32 pa, int32 val);
 #include "vax750_defs.h"
 #elif defined (VAX_730)
 #include "vax730_defs.h"
+#elif defined (VAX_410)
+#include "vax410_defs.h"
+#elif defined (VAX_420)
+#include "vax420_defs.h"
+#elif defined (VAX_43)
+#include "vax43_defs.h"
+#elif defined (VAX_440)
+#include "vax440_defs.h"
+#elif defined (IS_1000)
+#include "is1000_defs.h"
 #elif defined (VAX_610)
 #include "vax610_defs.h"
 #elif defined (VAX_620) || defined (VAX_630)
 #include "vax630_defs.h"
+#elif defined (VAX_820)
+#include "vax820_defs.h"
 #elif defined (VAX_860)
 #include "vax860_defs.h"
 #else /* VAX 3900 */
