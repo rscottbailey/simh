@@ -34,7 +34,6 @@
 */
 
 #include "vax_defs.h"
-#include <time.h>
 
 #ifdef DONT_USE_INTERNAL_ROM
 #if defined(VAX_620)
@@ -165,10 +164,6 @@ extern int32 qbmap_rd (int32 pa);
 extern void qbmap_wr (int32 pa, int32 val, int32 lnt);
 extern int32 qbmem_rd (int32 pa);
 extern void qbmem_wr (int32 pa, int32 val, int32 lnt);
-extern int32 wtc_rd (int32 pa);
-extern void wtc_wr (int32 pa, int32 val, int32 lnt);
-extern void wtc_set_valid (void);
-extern void wtc_set_invalid (void);
 extern int32 iccs_rd (void);
 extern int32 todr_rd (void);
 extern int32 rxcs_rd (void);
@@ -411,7 +406,7 @@ void nvr_wr (int32 pa, int32 val, int32 lnt)
 int32 rg = (pa + 1 - NVRBASE) >> 1;
 
 if (rg < 14)                                             /* watch chip */
-    wtc_wr (rg, val, lnt);
+    wtc_wr (rg, val);
 else {
     int32 orig_nvr = (int32)nvr[rg];
 
@@ -1091,7 +1086,7 @@ else if (MATCH_CMD(gbuf, "VAXSTATION") == 0) {
     va_dev.flags = va_dev.flags | DEV_DIS;               /* disable QDSS */
     lk_dev.flags = lk_dev.flags & ~DEV_DIS;              /* enable keyboard */
     vs_dev.flags = vs_dev.flags & ~DEV_DIS;              /* enable mouse */
-    strcpy (sim_name, "VAXStation II (KA630)");
+    strcpy (sim_name, "VAXstation II (KA630)");
     reset_all (0);                                       /* reset everything */
 #else
     return sim_messagef(SCPE_ARG, "Simulator built without Graphic Device Support\n");
@@ -1104,7 +1099,7 @@ else if (MATCH_CMD(gbuf, "VAXSTATIONGPX") == 0) {
     va_dev.flags = va_dev.flags & ~DEV_DIS;              /* enable QDSS */
     lk_dev.flags = lk_dev.flags & ~DEV_DIS;              /* enable keyboard */
     vs_dev.flags = vs_dev.flags & ~DEV_DIS;              /* enable mouse */
-    strcpy (sim_name, "VAXStation II/GPX (KA630)");
+    strcpy (sim_name, "VAXstation II/GPX (KA630)");
     reset_all (0);                                       /* reset everything */
 #else
     return sim_messagef(SCPE_ARG, "Simulator built without Graphic Device Support\n");
