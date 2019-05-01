@@ -84,17 +84,16 @@
 /* CPU */
 
 #if defined (VAX_411) || defined (VAX_412)
-#define CPU_MODEL_MODIFIERS \
-                        { 0 }
+#define CPU_MODEL_MODIFIERS 
 #else
 #if defined (VAX_41A) || defined (VAX_41D)
 #define CPU_MODEL_MODIFIERS \
                         { MTAB_XTD|MTAB_VDV, 0, "MODEL", "MODEL={MICROVAX|VAXSERVER}", \
-                          cpu_set_model, &cpu_show_model, NULL, "Set/Show the simulator CPU Model" }
+                          cpu_set_model, &cpu_show_model, NULL, "Set/Show the simulator CPU Model" },
 #else   /* defined (VAX_42A) || defined (VAX_42B) */
 #define CPU_MODEL_MODIFIERS \
                         { MTAB_XTD|MTAB_VDV, 0, "MODEL", "MODEL={MICROVAX|VAXSTATION|VAXSTATIONGPX|VAXSTATIONSPX}", \
-                          cpu_set_model, &cpu_show_model, NULL, "Set/Show the simulator CPU Model" }
+                          cpu_set_model, &cpu_show_model, NULL, "Set/Show the simulator CPU Model" },
 #endif
 #endif
 
@@ -235,7 +234,7 @@
 #define LP_MBZ84_TEST(r)
 #define LP_MBZ92_TEST(r)
 
-#define MT_AST_TEST(r)  if ((r) > AST_MAX) RSVD_OPND_FAULT
+#define MT_AST_TEST(r)  if ((r) > AST_MAX) RSVD_OPND_FAULT(MT_AST_TEST)
 
 /* Common CSI flags */
 
@@ -381,6 +380,11 @@ extern int32 sys_model;
 #define XS_READW        Map_ReadW
 #define XS_WRITEB       Map_WriteB
 #define XS_WRITEW       Map_WriteW
+#if (defined (VAX_411) || defined (VAX_412))            /* InfoServer? */
+#define XS_ADRMBO       (0)
+#else
+#define XS_ADRMBO       ((MEMSIZE -1) & 0xFF000000)     /* bits 31:24 have pull-ups */
+#endif
 
 /* Function prototypes for I/O */
 

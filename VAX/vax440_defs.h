@@ -98,10 +98,9 @@
 #if defined (VAX_46) || defined (VAX_48)
 #define CPU_MODEL_MODIFIERS \
                         { MTAB_XTD|MTAB_VDV, 0, "MODEL", "MODEL={MICROVAX|VAXSTATION}", \
-                          cpu_set_model, &cpu_show_model, NULL, "Set/Show the simulator CPU Model" }
+                          cpu_set_model, &cpu_show_model, NULL, "Set/Show the simulator CPU Model" },
 #else
-#define CPU_MODEL_MODIFIERS \
-                        { 0 }
+#define CPU_MODEL_MODIFIERS
 #endif
 
 /* Memory */
@@ -113,6 +112,7 @@
 #define INITMEMSIZE     (1 << 24)                       /* initial memory size */
 #define MEMSIZE         (cpu_unit.capac)
 #define ADDR_IS_MEM(x)  (((uint32) (x)) < MEMSIZE)
+#if defined (VAX_46) || defined (VAX_47)
 #define MEM_MODIFIERS   { UNIT_MSIZE, (1u << 23), NULL, "8M", &cpu_set_size }, \
                         { UNIT_MSIZE, (1u << 24), NULL, "16M", &cpu_set_size }, \
                         { UNIT_MSIZE, (1u << 24) + (1u << 23), NULL, "24M", &cpu_set_size }, \
@@ -122,7 +122,12 @@
                         { UNIT_MSIZE, (1u << 25) + (1u << 24) + (1u << 23), NULL, "56M", &cpu_set_size }, \
                         { UNIT_MSIZE, (1u << 26) + (1u << 23), NULL, "72M", &cpu_set_size }, \
                         { UNIT_MSIZE, (1u << 26) + (1u << 24), NULL, "80M", &cpu_set_size }, \
-                        { UNIT_MSIZE, (1u << 26) + (1u << 25) + (1u << 24), NULL, "104M", &cpu_set_size }
+                        { UNIT_MSIZE, (1u << 26) + (1u << 25) + (1u << 23), NULL, "104M", &cpu_set_size }
+#elif defined (VAX_48)
+#define MEM_MODIFIERS   { UNIT_MSIZE, (1u << 23), NULL, "8M", &cpu_set_size }, \
+                        { UNIT_MSIZE, (1u << 24), NULL, "16M", &cpu_set_size }, \
+                        { UNIT_MSIZE, (1u << 24) + (1u << 23), NULL, "24M", &cpu_set_size }
+#endif
 
 /* DMA map */
 
@@ -204,7 +209,7 @@
 #define LP_MBZ84_TEST(r)
 #define LP_MBZ92_TEST(r)
 
-#define MT_AST_TEST(r)  if ((r) > AST_MAX) RSVD_OPND_FAULT
+#define MT_AST_TEST(r)  if ((r) > AST_MAX) RSVD_OPND_FAULT(MT_AST_TEST)
 
 /* Common CSI flags */
 
@@ -315,6 +320,7 @@ extern int32 sys_model;
 #define XS_READW        Map_ReadW
 #define XS_WRITEB       Map_WriteB
 #define XS_WRITEW       Map_WriteW
+#define XS_ADRMBO       (0)
 
 /* Function prototypes for I/O */
 

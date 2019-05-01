@@ -84,7 +84,7 @@
 
 #define CPU_MODEL_MODIFIERS \
                         { MTAB_XTD|MTAB_VDV, 0, "MODEL", "MODEL={MICROVAX|VAXSTATION|VAXSTATIONGPX}", \
-                          cpu_set_model, &cpu_show_model, NULL, "Set/Show the simulator CPU Model" }
+                          cpu_set_model, &cpu_show_model, NULL, "Set/Show the simulator CPU Model" },
 
 /* Memory */
 
@@ -208,7 +208,7 @@
 #define LP_MBZ84_TEST(r)
 #define LP_MBZ92_TEST(r)
 
-#define MT_AST_TEST(r)  if ((r) > AST_MAX) RSVD_OPND_FAULT
+#define MT_AST_TEST(r)  if ((r) > AST_MAX) RSVD_OPND_FAULT(MT_AST_TEST)
 
 /* Common CSI flags */
 
@@ -337,6 +337,7 @@ extern int32 sys_model;
 #define XS_READW        Map_ReadW
 #define XS_WRITEB       Map_WriteB
 #define XS_WRITEW       Map_WriteW
+#define XS_ADRMBO       (0)
 
 
 /* Function prototypes for I/O */

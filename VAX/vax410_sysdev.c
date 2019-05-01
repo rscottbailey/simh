@@ -484,7 +484,7 @@ switch (rg) {
         break;
 
     default:
-        RSVD_OPND_FAULT;
+        RSVD_OPND_FAULT(ReadIPR);
         }
 
 return val;
@@ -516,7 +516,7 @@ switch (rg) {
         break;
 
     default:
-        RSVD_OPND_FAULT;
+        RSVD_OPND_FAULT(WriteIPR);
         }
 
 return;
@@ -955,7 +955,7 @@ else if (MATCH_CMD(gbuf, "VAXSTATIONGPX") == 0) {
     va_dev.flags = va_dev.flags & ~DEV_DIS;              /* enable GPX */
     lk_dev.flags = lk_dev.flags & ~DEV_DIS;              /* enable keyboard */
     vs_dev.flags = vs_dev.flags & ~DEV_DIS;              /* enable mouse */
-    strcpy (sim_name, "VAXstation 2000 GPX (KA410)");
+    strcpy (sim_name, "VAXstation 2000/GPX (KA410)");
     reset_all (0);                                       /* reset everything */
 #else
     return sim_messagef (SCPE_ARG, "Simulator built without Graphic Device Support\n");

@@ -79,8 +79,7 @@
 
 /* CPU */
 
-#define CPU_MODEL_MODIFIERS \
-                        { 0 }
+#define CPU_MODEL_MODIFIERS 
 
 /* Memory */
 
@@ -157,7 +156,7 @@
 #define LP_MBZ84_TEST(r)
 #define LP_MBZ92_TEST(r)
 
-#define MT_AST_TEST(r)  if ((r) > AST_MAX) RSVD_OPND_FAULT
+#define MT_AST_TEST(r)  if ((r) > AST_MAX) RSVD_OPND_FAULT(MT_AST_TEST)
 
 /* Common CSI flags */
 
@@ -262,6 +261,7 @@ extern int32 sys_model;
 #define XS_READW(ba,bc,buf)    Map_ReadW(ba, bc, buf, FALSE)
 #define XS_WRITEB(ba,bc,buf)   Map_WriteB(ba, bc, buf, FALSE)
 #define XS_WRITEW(ba,bc,buf)   Map_WriteW(ba, bc, buf, FALSE)
+#define XS_ADRMBO       (0)
 
 /* Function prototypes for I/O */
 
