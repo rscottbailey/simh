@@ -1175,6 +1175,9 @@ ifneq (3,$(GCC_MAJOR_VERSION))
   ifneq (,$(findstring -Wunused-result,$(shell $(GCC_WARNINGS_CMD))))
     CFLAGS_O += -Wno-unused-result
   endif
+  ifneq (,$(findstring -Wformat-truncation,$(shell $(GCC_WARNINGS_CMD))))
+    CFLAGS_O += -Wno-format-truncation
+  endif
 endif
 ifneq (clean,$(MAKECMDGOALS))
   BUILD_FEATURES := $(BUILD_FEATURES). $(COMPILER_NAME)
@@ -1920,7 +1923,8 @@ ATT3B2 = ${ATT3B2D}/3b2_cpu.c ${ATT3B2D}/3b2_mmu.c \
 	${ATT3B2D}/3b2_id.c ${ATT3B2D}/3b2_dmac.c \
 	${ATT3B2D}/3b2_sys.c ${ATT3B2D}/3b2_io.c \
 	${ATT3B2D}/3b2_ports.c ${ATT3B2D}/3b2_ctc.c \
-	${ATT3B2D}/3b2_ni.c ${ATT3B2D}/3b2_sysdev.c
+	${ATT3B2D}/3b2_ni.c ${ATT3B2D}/3b2_mau.c \
+	${ATT3B2D}/3b2_sysdev.c
 ATT3B2_OPT = -DUSE_INT64 -DUSE_ADDR64 -I ${ATT3B2D} ${NETWORK_OPT}
 #
 # Build everything (not the unsupported/incomplete or experimental simulators)
