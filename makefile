@@ -553,6 +553,13 @@ ifeq ($(WIN32),)  #*nix Environments (&& cygwin)
       OS_CCDEFS += -DHAVE_LIBPNG
       OS_LDFLAGS += -lpng
       $(info using libpng: $(call find_lib,png) $(call find_include,png))
+      ifneq (,$(call find_include,zlib))
+        ifneq (,$(call find_lib,z))
+          OS_CCDEFS += -DHAVE_ZLIB
+          OS_LDFLAGS += -lz
+          $(info using zlib: $(call find_lib,z) $(call find_include,zlib))
+        endif
+      endif
     endif
   endif
   ifneq (,$(call find_include,glob))
@@ -634,21 +641,21 @@ ifeq ($(WIN32),)  #*nix Environments (&& cygwin)
       ifeq (Darwin,$(OSTYPE))
         $(info *** Info *** Install the MacPorts libSDL2 package to provide this)
         $(info *** Info *** functionality for your OS X system:)
-        $(info *** Info ***       # port install libsdl2)
+        $(info *** Info ***       # port install libsdl2 libpng zlib)
         ifeq (/usr/local/bin/brew,$(shell which brew))
           $(info *** Info ***)
           $(info *** Info *** OR)
           $(info *** Info ***)
           $(info *** Info *** Install the HomeBrew libSDL2 package to provide this)
           $(info *** Info *** functionality for your OS X system:)
-          $(info *** Info ***       $$ brew install sdl2)
+          $(info *** Info ***       $$ brew install sdl2 libpng zlib)
         endif
       else
         ifneq (,$(and $(findstring Linux,$(OSTYPE)),$(call find_exe,apt-get)))
           $(info *** Info *** Install the development components of libSDL or libSDL2)
           $(info *** Info *** packaged for your operating system distribution for)
           $(info *** Info *** your Linux system:)
-          $(info *** Info ***        $$ sudo apt-get install libsdl2-dev)
+          $(info *** Info ***        $$ sudo apt-get install libsdl2-dev libpng-dev)
           $(info *** Info ***    or)
           $(info *** Info ***        $$ sudo apt-get install libsdl-dev)
         else
@@ -887,7 +894,7 @@ ifeq ($(WIN32),)  #*nix Environments (&& cygwin)
     NETWORK_OPT = $(NETWORK_CCDEFS)
   endif
   ifneq (binexists,$(shell if $(TEST) -e BIN/buildtools; then echo binexists; fi))
-    MKDIRBIN = mkdir -p BIN/buildtools
+    MKDIRBIN = @mkdir -p BIN/buildtools
   endif
   ifeq (commit-id-exists,$(shell if $(TEST) -e .git-commit-id; then echo commit-id-exists; fi))
     GIT_COMMIT_ID=$(shell grep 'SIM_GIT_COMMIT_ID' .git-commit-id | awk '{ print $$2 }')
@@ -985,6 +992,8 @@ else
       VIDEO_FEATURES = - video capabilities provided by libSDL2 (Simple Directmedia Layer)
       DISPLAYL = ${DISPLAYD}/display.c $(DISPLAYD)/sim_ws.c
       DISPLAYVT = ${DISPLAYD}/vt11.c
+      DISPLAY340 = ${DISPLAYD}/type340.c
+      DISPLAYNG = ${DISPLAYD}/ng.c
       DISPLAY_OPT += -DUSE_DISPLAY $(VIDEO_CCDEFS) $(VIDEO_LDFLAGS)
     else
       $(info ***********************************************************************)
@@ -1003,8 +1012,10 @@ else
   OS_CCDEFS += -fms-extensions $(PTHREADS_CCDEFS)
   OS_LDFLAGS += -lm -lwsock32 -lwinmm $(PTHREADS_LDFLAGS)
   EXE = .exe
-  ifneq (binexists,$(shell if exist BIN\buildtools echo binexists))
-    MKDIRBIN = if not exist BIN mkdir BIN\buildtools
+  ifneq (clean,$(MAKECMDGOALS))
+    ifneq (buildtoolsexists,$(shell if exist BIN\buildtools (echo buildtoolsexists) else (mkdir BIN\buildtools)))
+      MKDIRBIN=
+    endif
   endif
   ifneq ($(USE_NETWORK),)
     NETWORK_OPT += -DUSE_SHARED
@@ -2022,11 +2033,10 @@ ${BUILD_ROMS} :
 	${MKDIRBIN}
 ifeq ($(WIN32),)
 	@if $(TEST) \( ! -e $@ \) -o \( sim_BuildROMs.c -nt $@ \) ; then ${CC} sim_BuildROMs.c $(CC_OUTSPEC); fi
-	@$@
 else
-	if not exist $@ ${CC} sim_BuildROMs.c $(CC_OUTSPEC)
-	$(@D)\$(@F)
+	@if not exist $@ ${CC} sim_BuildROMs.c $(CC_OUTSPEC)
 endif
+	@$@
 
 #
 # Individual builds
