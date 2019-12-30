@@ -451,6 +451,7 @@ t_addr (*sim_vm_parse_addr) (DEVICE *dptr, CONST char *cptr, CONST char **tptr) 
 t_value (*sim_vm_pc_value) (void) = NULL;
 t_bool (*sim_vm_is_subroutine_call) (t_addr **ret_addrs) = NULL;
 t_bool (*sim_vm_fprint_stopped) (FILE *st, t_stat reason) = NULL;
+const char *sim_vm_release = NULL;
 const char **sim_clock_precalibrate_commands = NULL;
 
 
@@ -563,6 +564,7 @@ static t_stat _sim_debug_flush (void);
 
 /* Global data */
 
+const char *sim_prog_name = NULL;                       /* pointer to the executable name */
 DEVICE *sim_dflt_dev = NULL;
 UNIT *sim_clock_queue = QUEUE_LIST_END;
 int32 sim_interval = 0;
@@ -1975,6 +1977,8 @@ static const char simh_help[] =
       " which don't specify an explicit DELAY parameter along with a string\n"
       " If a SEND command is processed and no DELAY value has been specified,\n"
       " the default value of the delay parameter is 1000.\n"
+      " The value n can be specified with a suffix of k or m which indicates\n"
+      " a multiplier of 1000 or 1000000 respectively\n"
        /***************** 80 character line width template *************************/
       "4After\n"
       " Specifies an integer (>=0) representing a minimal number of instructions\n"
@@ -1985,6 +1989,8 @@ static const char simh_help[] =
       " which don't specify an explicit AFTER parameter along with a string\n"
       " If a SEND command is processed and no AFTER value has been specified,\n"
       " the default value of the delay parameter is the DELAY parameter value.\n"
+      " The value n can be specified with a suffix of k or m which indicates\n"
+      " a multiplier of 1000 or 1000000 respectively\n"
       "4Escaping String Data\n"
       " The following character escapes are explicitly supported:\n"
       "++\\r  Sends the ASCII Carriage Return character (Decimal value 13)\n"
@@ -2034,7 +2040,9 @@ static const char simh_help[] =
       " Data which is output prior to the definition of an expect rule is not\n"
       " eligible to be matched against.\n\n"
       " The NOEXPECT command removes a previously defined EXPECT command for the\n"
-      " console or a specific multiplexer line.\n\n"
+      " console or a specific multiplexer line.  A NOEXPECT command, without a\n"
+      " specific mention of a particular EXPECT match string, will remove all\n"
+      " currently defined EXPECT match rules.\n\n"
       " The SHOW EXPECT command displays all of the pending EXPECT state for\n"
       " the console or a specific multiplexer line.\n"
        /***************** 80 character line width template *************************/
@@ -2118,6 +2126,8 @@ static const char simh_help[] =
       " enough for more than one expect rule to match before an earlier haltafter\n"
       " delay has expired, only a single EXPECT rule can be defined if a non-zero\n"
       " HaltAfter parameter has been set.\n"
+      " The value n can be specified with a suffix of k or m which indicates\n"
+      " a multiplier of 1000 or 1000000 respectively\n"
       /***************** 80 character line width template *************************/
 #define HLP_SLEEP       "*Commands Executing_Command_Files Pausing_Command_Execution"
       "3Pausing Command Execution\n"
@@ -2538,6 +2548,7 @@ set_prompt (0, "sim>");                                 /* start with set standa
 sim_switches = 0;                                       /* init switches */
 lookswitch = TRUE;
 stdnul = fopen(NULL_DEVICE,"wb");
+sim_prog_name = argv [0];                               /* save a pointer to the program name */
 for (i = 1; i < argc; i++) {                            /* loop thru args */
     if (argv[i] == NULL)                                /* paranoia */
         continue;
@@ -3422,6 +3433,7 @@ return SCPE_OK;
 t_stat spawn_cmd (int32 flag, CONST char *cptr)
 {
 t_stat status;
+
 if ((cptr == NULL) || (strlen (cptr) == 0))
     cptr = getenv("SHELL");
 if ((cptr == NULL) || (strlen (cptr) == 0))
@@ -4740,9 +4752,9 @@ delay = get_default_env_parameter (dev_name, "SIM_SEND_DELAY", SEND_DEFAULT_DELA
 after = get_default_env_parameter (dev_name, "SIM_SEND_AFTER", delay);
 while (*cptr) {
     if ((!strncmp(gbuf, "DELAY=", 6)) && (gbuf[6])) {
-        delay = (uint32)get_uint (&gbuf[6], 10, 10000000, &r);
+        delay = (uint32)get_uint (&gbuf[6], 10, 2000000000, &r);
         if (r != SCPE_OK)
-            return sim_messagef (SCPE_ARG, "Invalid Delay Value\n");
+            return sim_messagef (SCPE_ARG, "Invalid Delay Value: %s\n", &gbuf[6]);
         cptr = tptr;
         tptr = get_glyph (cptr, gbuf, ',');
         delay_set = TRUE;
@@ -4751,9 +4763,9 @@ while (*cptr) {
         continue;
         }
     if ((!strncmp(gbuf, "AFTER=", 6)) && (gbuf[6])) {
-        after = (uint32)get_uint (&gbuf[6], 10, 10000000, &r);
+        after = (uint32)get_uint (&gbuf[6], 10, 2000000000, &r);
         if (r != SCPE_OK)
-            return sim_messagef (SCPE_ARG, "Invalid After Value\n");
+            return sim_messagef (SCPE_ARG, "Invalid After Value: %s\n", &gbuf[6]);
         cptr = tptr;
         tptr = get_glyph (cptr, gbuf, ',');
         after_set = TRUE;
@@ -5794,6 +5806,10 @@ setenv ("SIM_MINOR", vmin_s, 1);
 sprintf (vpat_s, "%d", vpat);
 setenv ("SIM_PATCH", vpat_s, 1);
 fprintf (st, "%s simulator V%d.%d-%d", sim_name, vmaj, vmin, vpat);
+if (sim_vm_release != NULL) {                           /* if a release string is defined */
+    setenv ("SIM_VM_RELEASE", sim_vm_release, 1);
+    fprintf (st, " Release %s", sim_vm_release);        /*   then display it */
+    }
 if (vdelt) {
     sprintf (vdelt_s, "%d", vdelt);
     setenv ("SIM_DELTA", vdelt_s, 1);
@@ -6607,11 +6623,18 @@ char path[CBUFSIZE];
 char *c;
 struct stat filestat;
 
+GET_SWITCHES (cptr);                                    /* get switches */
 if ((!cptr) || (*cptr == '\0'))
     return sim_messagef (SCPE_2FARG, "Must specify a directory path\n");
 strlcpy (path, cptr, sizeof (path));
 while ((c = strchr (path, '\\')))
     *c = '/';
+if (path[strlen (path) - 1] == '/')     /* trim any trailing / from the path */
+    path[strlen (path) - 1] = '\0';
+while ((c = strstr (path, "//")))        
+    memmove (c, c + 1, strlen (c + 1) + 1); /* clean out any empty directories // */
+if ((!stat (path, &filestat)) && (filestat.st_mode & S_IFDIR))
+    return sim_messagef (SCPE_OK, "directory %s already exists\n", path);
 c = path;
 while ((c = strchr (c, '/'))) {
     *c = '\0';
@@ -6647,6 +6670,7 @@ return SCPE_OK;
 
 t_stat rmdir_cmd (int32 flg, CONST char *cptr)
 {
+GET_SWITCHES (cptr);                                    /* get switches */
 if ((!cptr) || (*cptr == '\0'))
     return sim_messagef (SCPE_2FARG, "Must specify a directory\n");
 if (rmdir (cptr))
@@ -9429,7 +9453,17 @@ if ((cptr == tptr) || (val > max))
     *status = SCPE_ARG;
 else {
     while (sim_isspace (*tptr)) tptr++;
-    if (*tptr != 0)
+    if (sim_toupper (*tptr) == 'K') {
+        val *= 1000;
+        ++tptr;
+        }
+    else {
+        if (sim_toupper (*tptr) == 'M') {
+            val *= 1000000;
+            ++tptr;
+            }
+        }
+    if ((*tptr != 0) || (val > max))
         *status = SCPE_ARG;
     }
 return val;
@@ -11810,9 +11844,9 @@ if (*cptr == '[') {
     }
 tptr = get_glyph (cptr, gbuf, ',');
 if ((!strncmp(gbuf, "HALTAFTER=", 10)) && (gbuf[10])) {
-    after = (uint32)get_uint (&gbuf[10], 10, 100000000, &r);
+    after = (uint32)get_uint (&gbuf[10], 10, 2000000000, &r);
     if (r != SCPE_OK)
-        return sim_messagef (SCPE_ARG, "Invalid Halt After Value\n");
+        return sim_messagef (SCPE_ARG, "Invalid Halt After Value: %s\n", &gbuf[10]);
     cptr = tptr;
     after_set = TRUE;
     }
@@ -12308,6 +12342,12 @@ memcpy(snd->buffer+snd->insoff, data, size);
 snd->insoff += size;
 snd->delay = (sim_switches & SWMASK ('T')) ? (uint32)((sim_timer_inst_per_sec()*delay)/1000000.0) : delay;
 snd->after = (sim_switches & SWMASK ('T')) ? (uint32)((sim_timer_inst_per_sec()*after)/1000000.0) : after;
+if (sim_switches & SWMASK ('T'))
+    sim_debug (snd->dbit, snd->dptr, "%d bytes queued for input. Delay %d usecs = %d insts, After %d usecs = %d insts\n", 
+                                     (int)size, (int)delay, (int)snd->delay, (int)after, (int)snd->after);
+else
+    sim_debug (snd->dbit, snd->dptr, "%d bytes queued for input. Delay=%d, After=%d\n", 
+                                     (int)size, (int)delay, (int)after);
 snd->next_time = sim_gtime() + snd->after;
 return SCPE_OK;
 }
