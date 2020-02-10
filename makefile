@@ -70,12 +70,6 @@
 # Internal ROM support can be disabled if GNU make is invoked with
 # DONT_USE_ROMS=1 on the command line.
 #
-# The use of pthreads for various things can be disabled if GNU make is 
-# invoked with NOPTHREADS=1 on the command line.
-#
-# Asynchronous I/O support can be disabled if GNU make is invoked with
-# NOASYNCH=1 on the command line.
-#
 # For linting (or other code analyzers) make may be invoked similar to:
 #
 #   make GCC=cppcheck CC_OUTSPEC= LDFLAGS= CFLAGS_G="--enable=all --template=gcc" CC_STD=--std=c99
@@ -261,10 +255,7 @@ ifeq (${WIN32},)  #*nix Environments (&& cygwin)
   LTO_EXCLUDE_VERSIONS = 
   PCAPLIB = pcap
   ifeq (agcc,$(findstring agcc,${GCC})) # Android target build?
-    OS_CCDEFS = -D_GNU_SOURCE
-    ifeq (,$(NOASYNCH))
-      OS_CCDEFS += -DSIM_ASYNCH_IO 
-    endif
+    OS_CCDEFS = -D_GNU_SOURCE -DSIM_ASYNCH_IO 
     OS_LDFLAGS = -lm
   else # Non-Android (or Native Android) Builds
     ifeq (,$(INCLUDES)$(LIBRARIES))
@@ -471,38 +462,25 @@ ifeq (${WIN32},)  #*nix Environments (&& cygwin)
     OS_LDFLAGS += -lrt
     $(info using librt: $(call find_lib,rt))
   endif
-  ifneq (,$(NOPTHREADS))
-    OS_CCDEFS += -DDONT_USE_READER_THREAD
-  else
-    ifneq (,$(call find_include,pthread))
+  ifneq (,$(call find_include,pthread))
+    ifneq (,$(call find_lib,pthread))
+      OS_CCDEFS += -DUSE_READER_THREAD -DSIM_ASYNCH_IO 
+      OS_LDFLAGS += -lpthread
+      $(info using libpthread: $(call find_lib,pthread) $(call find_include,pthread))
+    else
+      LIBEXTSAVE := ${LIBEXT}
+      LIBEXT = a
       ifneq (,$(call find_lib,pthread))
-        OS_CCDEFS += -DUSE_READER_THREAD
-        ifeq (,$(NOASYNCH))
-          OS_CCDEFS += -DSIM_ASYNCH_IO 
-        endif
+        OS_CCDEFS += -DUSE_READER_THREAD -DSIM_ASYNCH_IO 
         OS_LDFLAGS += -lpthread
         $(info using libpthread: $(call find_lib,pthread) $(call find_include,pthread))
       else
-        LIBEXTSAVE := ${LIBEXT}
-        LIBEXT = a
-        ifneq (,$(call find_lib,pthread))
-          OS_CCDEFS += -DUSE_READER_THREAD
-          ifeq (,$(NOASYNCH))
-            OS_CCDEFS += -DSIM_ASYNCH_IO 
-          endif
-          OS_LDFLAGS += -lpthread
-          $(info using libpthread: $(call find_lib,pthread) $(call find_include,pthread))
-        else
-          ifneq (,$(findstring Haiku,$(OSTYPE)))
-            OS_CCDEFS += -DUSE_READER_THREAD
-            ifeq (,$(NOASYNCH))
-              OS_CCDEFS += -DSIM_ASYNCH_IO 
-            endif
-            $(info using libpthread: $(call find_include,pthread))
-          endif
+        ifneq (,$(findstring Haiku,$(OSTYPE)))
+          OS_CCDEFS += -DUSE_READER_THREAD -DSIM_ASYNCH_IO 
+          $(info using libpthread: $(call find_include,pthread))
         endif
-        LIBEXT = $(LIBEXTSAVE)
       endif
+      LIBEXT = $(LIBEXTSAVE)
     endif
   endif
   # Find PCRE RegEx library.
@@ -963,17 +941,11 @@ else
   $(info include paths are: ${INCPATH})
   # Give preference to any MinGW provided threading (if available)
   ifneq (,$(call find_include,pthread))
-    PTHREADS_CCDEFS = -DUSE_READER_THREAD
-    ifeq (,$(NOASYNCH))
-      PTHREADS_CCDEFS += -DSIM_ASYNCH_IO 
-    endif
+    PTHREADS_CCDEFS = -DUSE_READER_THREAD -DSIM_ASYNCH_IO
     PTHREADS_LDFLAGS = -lpthread
   else
     ifeq (pthreads,$(shell if exist ..\windows-build\pthreads\Pre-built.2\include\pthread.h echo pthreads))
-      PTHREADS_CCDEFS = -DUSE_READER_THREAD -DPTW32_STATIC_LIB -D_POSIX_C_SOURCE -I../windows-build/pthreads/Pre-built.2/include
-      ifeq (,$(NOASYNCH))
-        PTHREADS_CCDEFS += -DSIM_ASYNCH_IO 
-      endif
+      PTHREADS_CCDEFS = -DUSE_READER_THREAD -DPTW32_STATIC_LIB -D_POSIX_C_SOURCE -I../windows-build/pthreads/Pre-built.2/include -DSIM_ASYNCH_IO
       PTHREADS_LDFLAGS = -lpthreadGC2 -L..\windows-build\pthreads\Pre-built.2\lib
     endif
   endif
@@ -1164,10 +1136,14 @@ else
   ifneq (3,$(GCC_MAJOR_VERSION))
     ifeq (,$(GCC_OPTIMIZERS_CMD))
       GCC_OPTIMIZERS_CMD = ${GCC} --help=optimizers
+      GCC_COMMON_CMD = ${GCC} --help=common
     endif
   endif
   ifneq (,$(GCC_OPTIMIZERS_CMD))
     GCC_OPTIMIZERS = $(shell $(GCC_OPTIMIZERS_CMD))
+  endif
+  ifneq (,$(GCC_COMMON_CMD))
+    GCC_OPTIMIZERS += $(shell $(GCC_COMMON_CMD))
   endif
   ifneq (,$(findstring $(GCC_VERSION),$(LTO_EXCLUDE_VERSIONS)))
     NO_LTO = 1
@@ -1787,11 +1763,12 @@ IMDS210 = ${IMDS210C}/i8080.c ${IMDS210D}/imds-210_sys.c \
 	${IMDS210C}/i8251.c ${IMDS210C}/i8255.c \
 	${IMDS210C}/i8259.c ${IMDS210C}/i8253.c \
 	${IMDS210C}/ieprom.c ${IMDS210C}/iram8.c \
-	${IMDS210C}/ipbmultibus.c ${IMDS210C}/ipb.c \
+	${IMDS210C}/multibus.c ${IMDS210C}/ipb.c \
 	${IMDS210C}/ipc-cont.c ${IMDS210C}/ioc-cont.c \
 	${IMDS210C}/isbc202.c ${IMDS210C}/isbc201.c \
-	${IMDS210C}/isbc206.c ${IMDS210C}/isbc464.c \
-	${IMDS210C}/zx200a.c ${IMDS210C}/isbc064.c
+	${IMDS210C}/isbc206.c ${IMDS210C}/isbc208.c \
+	${IMDS210C}/isbc464.c ${IMDS210C}/zx200a.c \
+	${IMDS210C}/isbc064.c
 IMDS210_OPT = -I ${IMDS210D}
 
 
@@ -1801,11 +1778,12 @@ IMDS220 = ${IMDS220C}/i8080.c ${IMDS220D}/imds-220_sys.c \
 	${IMDS220C}/i8251.c ${IMDS220C}/i8255.c \
 	${IMDS220C}/i8259.c ${IMDS220C}/i8253.c \
 	${IMDS220C}/ieprom.c ${IMDS220C}/iram8.c \
-	${IMDS220C}/ipbmultibus.c ${IMDS220C}/ipb.c \
+	${IMDS220C}/multibus.c ${IMDS220C}/ipb.c \
 	${IMDS220C}/ipc-cont.c ${IMDS220C}/ioc-cont.c \
 	${IMDS220C}/isbc202.c ${IMDS220C}/isbc201.c \
-	${IMDS220C}/isbc206.c ${IMDS220C}/isbc464.c \
-	${IMDS220C}/zx200a.c ${IMDS220C}/isbc064.c
+	${IMDS220C}/isbc206.c ${IMDS210C}/isbc208.c \
+	${IMDS220C}/isbc464.c ${IMDS220C}/zx200a.c \
+	${IMDS220C}/isbc064.c
 IMDS220_OPT = -I ${IMDS220D}
 
 
@@ -1815,11 +1793,12 @@ IMDS225 = ${IMDS225C}/i8080.c ${IMDS225D}/imds-225_sys.c \
 	${IMDS225C}/i8251.c ${IMDS225C}/i8255.c \
 	${IMDS225C}/i8259.c ${IMDS225C}/i8253.c \
 	${IMDS225C}/ieprom.c ${IMDS225C}/iram8.c \
-	${IMDS225C}/ipcmultibus.c ${IMDS225C}/ipc.c \
+	${IMDS225C}/multibus.c ${IMDS225C}/ipc.c \
 	${IMDS225C}/ipc-cont.c ${IMDS225C}/ioc-cont.c \
 	${IMDS225C}/isbc202.c ${IMDS225C}/isbc201.c \
 	${IMDS225C}/zx200a.c ${IMDS225C}/isbc464.c \
-	${IMDS225C}/isbc206.c
+	${IMDS225C}/isbc206.c ${IMDS225C}/isbc208.c \
+	${IMDS220C}/isbc064.c
 IMDS225_OPT = -I ${IMDS225D}
 
 
@@ -1829,11 +1808,12 @@ IMDS230 = ${IMDS230C}/i8080.c ${IMDS230D}/imds-230_sys.c \
 	${IMDS230C}/i8251.c ${IMDS230C}/i8255.c \
 	${IMDS230C}/i8259.c ${IMDS230C}/i8253.c \
 	${IMDS230C}/ieprom.c ${IMDS230C}/iram8.c \
-	${IMDS230C}/ipbmultibus.c ${IMDS230C}/ipb.c \
+	${IMDS230C}/multibus.c ${IMDS230C}/ipb.c \
 	${IMDS230C}/ipc-cont.c ${IMDS230C}/ioc-cont.c \
 	${IMDS230C}/isbc202.c ${IMDS230C}/isbc201.c \
-	${IMDS230C}/isbc206.c ${IMDS230C}/isbc464.c \
-	${IMDS230C}/zx200a.c ${IMDS230C}/isbc064.c
+	${IMDS230C}/isbc206.c ${IMDS230C}/isbc208.c \
+	${IMDS230C}/isbc464.c ${IMDS230C}/zx200a.c \
+	${IMDS230C}/isbc064.c
 IMDS230_OPT = -I ${IMDS230D}
 
 
@@ -1843,7 +1823,7 @@ IMDS800 = ${IMDS800C}/i8080.c ${IMDS800D}/imds-800_sys.c \
         ${IMDS800D}/cpu.c ${IMDS800D}/front_panel.c \
         ${IMDS800D}/monitor.c ${IMDS800C}/ieprom1.c \
 	${IMDS800C}/i8251.c ${IMDS800C}/ieprom.c \
-	${IMDS800C}/m800multibus.c ${IMDS800C}/isbc064.c \
+	${IMDS800C}/multibus.c ${IMDS800C}/isbc064.c \
 	${IMDS800C}/isbc202.c ${IMDS800C}/isbc201.c \
 	${IMDS800C}/zx200a.c ${IMDS800C}/isbc464.c \
 	${IMDS800C}/isbc206.c ${IMDS800C}/i3214.c
@@ -1856,7 +1836,7 @@ IMDS810 = ${IMDS800C}/i8080.c ${IMDS810D}/imds-810_sys.c \
         ${IMDS810D}/cpu.c ${IMDS810D}/front_panel.c \
         ${IMDS810D}/monitor.c ${IMDS810C}/ieprom1.c \
 	${IMDS810C}/i8251.c ${IMDS810C}/ieprom.c \
-	${IMDS810C}/m800multibus.c ${IMDS810C}/isbc064.c \
+	${IMDS810C}/multibus.c ${IMDS810C}/isbc064.c \
 	${IMDS810C}/isbc202.c ${IMDS810C}/isbc201.c \
 	${IMDS810C}/zx200a.c ${IMDS810C}/isbc464.c \
 	${IMDS810C}/isbc206.c ${IMDS800C}/i3214.c
@@ -1912,10 +1892,36 @@ BESM6 = ${BESM6D}/besm6_cpu.c ${BESM6D}/besm6_sys.c ${BESM6D}/besm6_mmu.c \
         ${BESM6D}/besm6_punch.c ${BESM6D}/besm6_punchcard.c
 
 ifneq (,$(BESM6_BUILD))
+    BESM6_OPT = -I ${BESM6D} -DUSE_INT64 $(BESM6_PANEL_OPT)
     ifneq (,$(and ${SDLX_CONFIG},${VIDEO_LDFLAGS}, $(or $(and $(call find_include,SDL2/SDL_ttf),$(call find_lib,SDL2_ttf)), $(and $(call find_include,SDL/SDL_ttf),$(call find_lib,SDL_ttf)))))
         FONTPATH += /usr/share/fonts /Library/Fonts /usr/lib/jvm /System/Library/Frameworks/JavaVM.framework/Versions C:/Windows/Fonts
         FONTPATH := $(dir $(foreach dir,$(strip $(FONTPATH)),$(wildcard $(dir)/.)))
         FONTNAME += DejaVuSans.ttf LucidaSansRegular.ttf FreeSans.ttf AppleGothic.ttf tahoma.ttf
+#cmake-insert:set(BESM6_FONT)
+#cmake-insert:foreach (fdir IN ITEMS
+#cmake-insert:            "/usr/share/fonts" "/Library/Fonts" "/usr/lib/jvm"
+#cmake-insert:            "/System/Library/Frameworks/JavaVM.framework/Versions"
+#cmake-insert:            "$ENV{WINDIR}/Fonts")
+#cmake-insert:    foreach (font IN ITEMS
+#cmake-insert:                "DejaVuSans.ttf" "LucidaSansRegular.ttf" "FreeSans.ttf" "AppleGothic.ttf" "tahoma.ttf")
+#cmake-insert:        if (EXISTS ${fdir})
+#cmake-insert:            file(GLOB_RECURSE found_font ${fdir}/${font})
+#cmake-insert:            if (found_font)
+#cmake-insert:                get_filename_component(fontfile ${found_font} ABSOLUTE)
+#cmake-insert:                list(APPEND BESM6_FONT ${fontfile})
+#cmake-insert:            endif ()
+#cmake-insert:        endif ()
+#cmake-insert:    endforeach()
+#cmake-insert:endforeach()
+#cmake-insert:
+#cmake-insert:if (NOT BESM6_FONT)
+#cmake-insert:    message("No font file available, BESM-6 video panel disabled")
+#cmake-insert:    set(BESM6_PANEL_OPT)
+#cmake-insert:endif ()
+#cmake-insert:
+#cmake-insert:if (BESM6_FONT AND WITH_VIDEO)
+#cmake-insert:    list(GET BESM6_FONT 0 BESM6_FONT)
+#cmake-insert:endif ()
         $(info font paths are: $(FONTPATH))
         $(info font names are: $(FONTNAME))
         find_fontfile = $(strip $(firstword $(foreach dir,$(strip $(FONTPATH)),$(wildcard $(dir)/$(1))$(wildcard $(dir)/*/$(1))$(wildcard $(dir)/*/*/$(1))$(wildcard $(dir)/*/*/*/$(1)))))
@@ -1965,13 +1971,11 @@ ifneq (,$(BESM6_BUILD))
     else ifneq (,$(and $(findstring sdl2,${VIDEO_LDFLAGS}),$(call find_include,SDL2/SDL_ttf),$(call find_lib,SDL2_ttf)))
         $(info using libSDL2_ttf: $(call find_lib,SDL2_ttf) $(call find_include,SDL2/SDL_ttf))
         $(info ***)
-        BESM6_OPT = -I ${BESM6D} -DFONTFILE=${FONTFILE} -DUSE_INT64 ${VIDEO_CCDEFS} ${VIDEO_LDFLAGS} -lSDL2_ttf
+        BESM6_PANEL_OPT = -DFONTFILE=${FONTFILE} ${VIDEO_CCDEFS} ${VIDEO_LDFLAGS} -lSDL2_ttf
     else ifneq (,$(and $(call find_include,SDL/SDL_ttf),$(call find_lib,SDL_ttf)))
         $(info using libSDL_ttf: $(call find_lib,SDL_ttf) $(call find_include,SDL/SDL_ttf))
         $(info ***)
-        BESM6_OPT = -I ${BESM6D} -DFONTFILE=${FONTFILE} -DUSE_INT64 ${VIDEO_CCDEFS} ${VIDEO_LDFLAGS} -lSDL_ttf
-    else
-        BESM6_OPT = -I ${BESM6D} -DUSE_INT64 
+        BESM6_PANEL_OPT = -DFONTFILE=${FONTFILE} ${VIDEO_CCDEFS} ${VIDEO_LDFLAGS} -lSDL_ttf
     endif
 endif
 
@@ -2754,7 +2758,7 @@ besm6 : ${BIN}besm6${EXE}
 ${BIN}besm6${EXE} : ${BESM6} ${SIM}
 ifneq (1,${CPP_BUILD}${CPP_FORCE})
 	${MKDIRBIN}
-	${CC} ${BESM6} ${SIM} ${BESM6_OPT} ${CC_OUTSPEC} ${LDFLAGS}
+	${CC} ${BESM6} ${SIM} ${BESM6_OPT} ${BESM6_PANEL_OPT} ${CC_OUTSPEC} ${LDFLAGS}
 ifneq (,$(call find_test,${BESM6D},besm6))
 	$@ $(call find_test,${BESM6D},besm6) ${TEST_ARG}
 endif
