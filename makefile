@@ -595,32 +595,6 @@ ifeq (${WIN32},)  #*nix Environments (&& cygwin)
           endif
         endif
       endif
-    else
-      ifneq (,$(call find_include,SDL/SDL))
-        ifneq (,$(call find_lib,SDL))
-          ifneq (,$(findstring Haiku,$(OSTYPE)))
-            ifneq (,$(shell which sdl-config))
-              SDLX_CONFIG = sdl-config
-            endif
-          else
-            SDLX_CONFIG = $(realpath $(dir $(call find_include,SDL/SDL))../../bin/sdl-config)
-          endif
-          ifneq (,$(SDLX_CONFIG))
-            VIDEO_CCDEFS += -DHAVE_LIBSDL -DUSE_SIM_VIDEO `$(SDLX_CONFIG) --cflags`
-            VIDEO_LDFLAGS += `$(SDLX_CONFIG) --libs`
-            VIDEO_FEATURES = - video capabilities provided by libSDL (Simple Directmedia Layer)
-            DISPLAYL = ${DISPLAYD}/display.c $(DISPLAYD)/sim_ws.c
-            DISPLAYVT = ${DISPLAYD}/vt11.c
-            DISPLAY340 = ${DISPLAYD}/type340.c
-            DISPLAYNG = ${DISPLAYD}/ng.c
-            DISPLAY_OPT += -DUSE_DISPLAY $(VIDEO_CCDEFS) $(VIDEO_LDFLAGS)
-            $(info using libSDL: $(call find_include,SDL/SDL))
-            ifeq (Darwin,$(OSTYPE))
-              VIDEO_CCDEFS += -DSDL_MAIN_AVAILABLE
-            endif
-          endif
-        endif
-      endif
     endif
     ifeq (cygwin,$(OSTYPE))
       LIBEXT = $(LIBEXTSAVE)
@@ -2054,13 +2028,13 @@ KL10 = ${KL10D}/kx10_cpu.c ${KL10D}/kx10_sys.c ${KL10D}/kx10_df.c \
 KL10_OPT = -DKL=1 -DUSE_INT64 -I $(KL10D) -DUSE_SIM_CARD ${NETWORK_OPT} 
 
 ATT3B2D = ${SIMHD}/3B2
-ATT3B2 = ${ATT3B2D}/3b2_cpu.c ${ATT3B2D}/3b2_mmu.c \
-	${ATT3B2D}/3b2_iu.c ${ATT3B2D}/3b2_if.c \
-	${ATT3B2D}/3b2_id.c ${ATT3B2D}/3b2_dmac.c \
-	${ATT3B2D}/3b2_sys.c ${ATT3B2D}/3b2_io.c \
+ATT3B2M400 = ${ATT3B2D}/3b2_400_cpu.c ${ATT3B2D}/3b2_400_sys.c \
+	${ATT3B2D}/3b2_400_stddev.c ${ATT3B2D}/3b2_400_mmu.c \
+	${ATT3B2D}/3b2_400_mau.c ${ATT3B2D}/3b2_iu.c \
+	${ATT3B2D}/3b2_if.c ${ATT3B2D}/3b2_id.c \
+	${ATT3B2D}/3b2_dmac.c ${ATT3B2D}/3b2_io.c \
 	${ATT3B2D}/3b2_ports.c ${ATT3B2D}/3b2_ctc.c \
-	${ATT3B2D}/3b2_ni.c ${ATT3B2D}/3b2_mau.c \
-	${ATT3B2D}/3b2_sysdev.c
+	${ATT3B2D}/3b2_ni.c
 ATT3B2_OPT = -DUSE_INT64 -DUSE_ADDR64 -I ${ATT3B2D} ${NETWORK_OPT}
 
 ###
@@ -2824,9 +2798,9 @@ endif
 
 3b2 : ${BIN}3b2${EXE}
  
-${BIN}3b2${EXE} : ${ATT3B2} ${SIM} ${BUILD_ROMS}
+${BIN}3b2${EXE} : ${ATT3B2M400} ${SIM} ${BUILD_ROMS}
 	${MKDIRBIN}
-	${CC} ${ATT3B2} ${SIM} ${ATT3B2_OPT} ${CC_OUTSPEC} ${LDFLAGS}
+	${CC} ${ATT3B2M400} ${SIM} ${ATT3B2_OPT} ${CC_OUTSPEC} ${LDFLAGS}
 ifneq (,$(call find_test,${ATT3B2D},3b2))
 	$@ $(call find_test,${ATT3B2D},3b2) ${TEST_ARG}
 endif
