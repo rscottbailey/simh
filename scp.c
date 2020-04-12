@@ -754,57 +754,58 @@ const struct scp_error {
     const char *code;
     const char *message;
     } scp_errors[1+SCPE_MAX_ERR-SCPE_BASE] =
-        {{"NXM",     "Address space exceeded"},
-         {"UNATT",   "Unit not attached"},
-         {"IOERR",   "I/O error"},
-         {"CSUM",    "Checksum error"},
-         {"FMT",     "Format error"},
-         {"NOATT",   "Unit not attachable"},
-         {"OPENERR", "File open error"},
-         {"MEM",     "Memory exhausted"},
-         {"ARG",     "Invalid argument"},
-         {"STEP",    "Step expired"},
-         {"UNK",     "Unknown command"},
-         {"RO",      "Read only argument"},
-         {"INCOMP",  "Command not completed"},
-         {"STOP",    "Simulation stopped"},
-         {"EXIT",    "Goodbye"},
-         {"TTIERR",  "Console input I/O error"},
-         {"TTOERR",  "Console output I/O error"},
-         {"EOF",     "End of file"},
-         {"REL",     "Relocation error"},
-         {"NOPARAM", "No settable parameters"},
-         {"ALATT",   "Unit already attached"},
-         {"TIMER",   "Hardware timer error"},
-         {"SIGERR",  "Signal handler setup error"},
-         {"TTYERR",  "Console terminal setup error"},
-         {"SUB",     "Subscript out of range"},
-         {"NOFNC",   "Command not allowed"},
-         {"UDIS",    "Unit disabled"},
-         {"NORO",    "Read only operation not allowed"},
-         {"INVSW",   "Invalid switch"},
-         {"MISVAL",  "Missing value"},
-         {"2FARG",   "Too few arguments"},
-         {"2MARG",   "Too many arguments"},
-         {"NXDEV",   "Non-existent device"},
-         {"NXUN",    "Non-existent unit"},
-         {"NXREG",   "Non-existent register"},
-         {"NXPAR",   "Non-existent parameter"},
-         {"NEST",    "Nested DO command limit exceeded"},
-         {"IERR",    "Internal error"},
-         {"MTRLNT",  "Invalid magtape record length"},
-         {"LOST",    "Console Telnet connection lost"},
-         {"TTMO",    "Console Telnet connection timed out"},
-         {"STALL",   "Console Telnet output stall"},
-         {"AFAIL",   "Assertion failed"},
-         {"INVREM",  "Invalid remote console command"},
-         {"EXPECT",  "Expect matched"},
-         {"AMBREG",  "Ambiguous register name"},
-         {"REMOTE",  "remote console command"},
-         {"INVEXPR", "invalid expression"},
-         {"SIGTERM", "SIGTERM received"},
-         {"FSSIZE",  "File System size larger than disk size"},
-         {"RUNTIME", "Run time limit exhausted"},
+        {{"NXM",       "Address space exceeded"},
+         {"UNATT",     "Unit not attached"},
+         {"IOERR",     "I/O error"},
+         {"CSUM",      "Checksum error"},
+         {"FMT",       "Format error"},
+         {"NOATT",     "Unit not attachable"},
+         {"OPENERR",   "File open error"},
+         {"MEM",       "Memory exhausted"},
+         {"ARG",       "Invalid argument"},
+         {"STEP",      "Step expired"},
+         {"UNK",       "Unknown command"},
+         {"RO",        "Read only argument"},
+         {"INCOMP",    "Command not completed"},
+         {"STOP",      "Simulation stopped"},
+         {"EXIT",      "Goodbye"},
+         {"TTIERR",    "Console input I/O error"},
+         {"TTOERR",    "Console output I/O error"},
+         {"EOF",       "End of file"},
+         {"REL",       "Relocation error"},
+         {"NOPARAM",   "No settable parameters"},
+         {"ALATT",     "Unit already attached"},
+         {"TIMER",     "Hardware timer error"},
+         {"SIGERR",    "Signal handler setup error"},
+         {"TTYERR",    "Console terminal setup error"},
+         {"SUB",       "Subscript out of range"},
+         {"NOFNC",     "Command not allowed"},
+         {"UDIS",      "Unit disabled"},
+         {"NORO",      "Read only operation not allowed"},
+         {"INVSW",     "Invalid switch"},
+         {"MISVAL",    "Missing value"},
+         {"2FARG",     "Too few arguments"},
+         {"2MARG",     "Too many arguments"},
+         {"NXDEV",     "Non-existent device"},
+         {"NXUN",      "Non-existent unit"},
+         {"NXREG",     "Non-existent register"},
+         {"NXPAR",     "Non-existent parameter"},
+         {"NEST",      "Nested DO command limit exceeded"},
+         {"IERR",      "Internal error"},
+         {"MTRLNT",    "Invalid magtape record length"},
+         {"LOST",      "Console Telnet connection lost"},
+         {"TTMO",      "Console Telnet connection timed out"},
+         {"STALL",     "Console Telnet output stall"},
+         {"AFAIL",     "Assertion failed"},
+         {"INVREM",    "Invalid remote console command"},
+         {"EXPECT",    "Expect matched"},
+         {"AMBREG",    "Ambiguous register name"},
+         {"REMOTE",    "remote console command"},
+         {"INVEXPR",   "invalid expression"},
+         {"SIGTERM",   "SIGTERM received"},
+         {"FSSIZE",    "File System size larger than disk size"},
+         {"RUNTIME",   "Run time limit exhausted"},
+         {"INCOMPDSK", "Incompatible Disk Container"},
     };
 
 const size_t size_map[] = { sizeof (int8),
@@ -6089,7 +6090,6 @@ if (flag) {
     fprintf (st, "\n        Time taken by msleep(1): %dms", os_ms_sleep_1);
     if (eth_version ())
         fprintf (st, "\n        Ethernet packet info: %s", eth_version());
-    fprintf (st, "\n        Time taken by msleep(1): %dms", os_ms_sleep_1);
 #if defined(__VMS)
     if (1) {
         char *arch = 
@@ -15380,6 +15380,10 @@ for (i = 0; (dptr = sim_devices[i]) != NULL; i++) {
     t_stat tstat = SCPE_OK;
     t_bool was_disabled = ((dptr->flags & DEV_DIS) != 0);
 
+    if (DEV_TYPE(dptr) == 0) {
+        sim_printf ("Skipping %s - non library device type\n", dptr->name);
+        continue;                       /* skip unspecified devices */
+        }
     sim_switches = saved_switches;
     if (was_disabled)
         tstat = set_dev_enbdis (dptr, NULL, 1, NULL);
@@ -15405,11 +15409,21 @@ for (i = 0; (dptr = sim_devices[i]) != NULL; i++) {
             default:
                 break;
             }
+        if (was_disabled)
+            set_dev_enbdis (dptr, NULL, 0, NULL);
         }
-    if (was_disabled)
-        set_dev_enbdis (dptr, NULL, 0, NULL);
-    if (tstat != SCPE_OK)
+    else
+        tstat = SCPE_OK;        /* can't enable, just skip device */
+    if (tstat != SCPE_OK) {
         stat = tstat;
+        sim_printf ("%s device tests returned: %d - %s\n", dptr->name, tstat, sim_error_text (tstat));
+        if (sim_ttisatty()) {
+            if (get_yn ("Continue with additional tests? [N]", SCPE_STOP) == SCPE_STOP)
+                break;
+            }
+        else
+            break;
+        }
     }
 return stat;
 }
