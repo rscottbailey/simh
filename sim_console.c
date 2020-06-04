@@ -750,7 +750,6 @@ static CTAB allowed_remote_cmds[] = {
     { "REPEAT",   &x_repeat_cmd,      0 },
     { "COLLECT",  &x_collect_cmd,     0 },
     { "SAMPLEOUT",&x_sampleout_cmd,   0 },
-    { "STEP",     &x_step_cmd,        0 },
     { "PWD",      &pwd_cmd,           0 },
     { "SAVE",     &save_cmd,          0 },
     { "DIR",      &dir_cmd,           0 },
@@ -772,11 +771,11 @@ static CTAB allowed_master_remote_cmds[] = {
     { "ASSIGN",   &assign_cmd,        0 },
     { "DEASSIGN", &deassign_cmd,      0 },
     { "CONTINUE", &x_continue_cmd,    0 },
+    { "STEP",     &x_step_cmd,        0 },
     { "REPEAT",   &x_repeat_cmd,      0 },
     { "COLLECT",  &x_collect_cmd,     0 },
     { "SAMPLEOUT",&x_sampleout_cmd,   0 },
     { "EXECUTE",  &x_execute_cmd,     0 },
-    { "STEP",     &x_step_cmd,        0 },
     { "PWD",      &pwd_cmd,           0 },
     { "SAVE",     &save_cmd,          0 },
     { "CD",       &set_default_cmd,   0 },
@@ -2006,6 +2005,13 @@ if (bufsize < 1400)
     return sim_messagef (SCPE_ARG, "%d is too small.  Minimum size is 1400\n", bufsize);
 sprintf(cmdbuf, "BUFFERED=%d", bufsize);
 return tmxr_open_master (&sim_rem_con_tmxr, cmdbuf);        /* open master socket */
+}
+
+t_bool sim_is_remote_console_master_line (void *lp)
+{
+return sim_rem_master_mode &&                                           /* master mode */
+       (((TMLN *)lp) >= sim_rem_con_tmxr.ldsc) &&                       /* And it is one of the Remote Console Lines */
+       (((TMLN *)lp) < sim_rem_con_tmxr.ldsc + sim_rem_con_tmxr.lines);
 }
 
 /* Enable or disable Remote Console master mode */
