@@ -288,7 +288,7 @@
         AIO_UNLOCK;                                             \
         }                                                       \
     else                                                        \
-        (void)0                                                 \
+        (void)0
 
 #define SZ_D(dp) (size_map[((dp)->dwidth + CHAR_BIT - 1) / CHAR_BIT])
 #define SZ_R(rp) \
@@ -5871,22 +5871,63 @@ return NULL;
 
 /* Show device and unit */
 
+static size_t dev_name_len;
+
+const char *_sim_name_prefix (const char *name, const char *prefix)
+{
+static char nambuf[CBUFSIZE];
+size_t prefix_len = prefix ? strlen (prefix) : 0;
+size_t name_len = name ? strlen (name) : 0;
+size_t string_len = prefix_len + name_len;
+
+snprintf (nambuf, sizeof (nambuf), "%s%*s", prefix ? prefix : "", 
+                                           ((string_len <= 6) && (dev_name_len <= 6)) ? -((int)(8 - prefix_len)) : 
+                                                                                        -((int)(dev_name_len + 2)), 
+                                           name ? name : "");
+return nambuf;
+}
+
+const char *_sim_dname_prefix (DEVICE *dptr, const char *prefix)
+{
+return _sim_name_prefix (sim_dname (dptr), prefix);
+}
+
+const char *_sim_uname_prefix (UNIT *uptr, const char *prefix)
+{
+return _sim_name_prefix (sim_uname (uptr), prefix);
+}
+
+const char *_sim_dname (DEVICE *dptr)
+{
+return _sim_dname_prefix (dptr, "");
+}
+
+const char *_sim_uname (UNIT *uptr)
+{
+return _sim_uname_prefix (uptr, "");
+}
+
+const char *_sim_dname_space ()
+{
+return _sim_dname_prefix (NULL, "");
+}
+
 t_stat show_device (FILE *st, DEVICE *dptr, int32 flag)
 {
 uint32 j, udbl, ucnt;
 UNIT *uptr;
-int32 toks = 0;
+int32 toks = -1;
 
-fprintf (st, "%s", sim_dname (dptr));                   /* print dev name */
+fprintf (st, "%s", _sim_dname (dptr));                   /* print dev name */
 if ((flag == 2) && dptr->description) {
-    fprintf (st, "\t%s\n", dptr->description(dptr));
+    fprintf (st, "%s\n", dptr->description(dptr));
     }
 else {
     if ((sim_switches & SWMASK ('D')) && dptr->description)
-        fprintf (st, "\t%s\n", dptr->description(dptr));
+        fprintf (st, "%s\n", dptr->description(dptr));
     }
 if (qdisable (dptr)) {                                  /* disabled? */
-    fprintf (st, "\tdisabled\n");
+    fprintf (st, "%s\n", "disabled");
     return SCPE_OK;
     }
 for (j = ucnt = udbl = 0; j < dptr->numunits; j++) {    /* count units */
@@ -5927,19 +5968,23 @@ return SCPE_OK;
 
 void fprint_sep (FILE *st, int32 *tokens)
 {
-fprintf (st, (*tokens > 0) ? ", " : "\t");
+fprintf (st, "%s", (*tokens > 0) ? ", " : ((*tokens < 0) ? "" : _sim_dname_space ()));
 *tokens += 1;
+if (*tokens == 0)
+    *tokens = 1;
 }
 
 t_stat show_unit (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag)
 {
-int32 u = (int32)(uptr - dptr->units);
-int32 toks = 0;
+int32 toks = -1;
 
 if (flag > 1)
-    fprintf (st, "  %s%d", sim_dname (dptr), u);
-else if (flag < 0)
-    fprintf (st, "%s%d", sim_dname (dptr), u);
+    fprintf (st, "%s", _sim_uname_prefix (uptr, "  "));
+else 
+    if (flag < 0)
+        fprintf (st, "%s", _sim_uname (uptr));
+    else
+        toks = 0;
 if (uptr->flags & UNIT_FIX) {
     fprint_sep (st, &toks);
     fprint_capac (st, dptr, uptr);
@@ -6221,8 +6266,12 @@ if (flag) {
 #if defined(SIM_GIT_COMMIT_ID)
 #define S_xstr(a) S_str(a)
 #define S_str(a) #a
-fprintf (st, "%sgit commit id: %8.8s", flag ? "\n        " : "        ", S_xstr(SIM_GIT_COMMIT_ID));
-setenv ("SIM_GIT_COMMIT_ID", S_xstr(SIM_GIT_COMMIT_ID), 1);
+if (1) {
+    const char *extras = strchr (S_xstr(SIM_GIT_COMMIT_ID), '+');
+
+    fprintf (st, "%sgit commit id: %8.8s%s", flag ? "\n        " : "        ", S_xstr(SIM_GIT_COMMIT_ID), extras ? extras : "");
+    setenv ("SIM_GIT_COMMIT_ID", S_xstr(SIM_GIT_COMMIT_ID), 1);
+    }
 #if defined(SIM_GIT_COMMIT_TIME)
 setenv ("SIM_GIT_COMMIT_TIME", S_xstr(SIM_GIT_COMMIT_TIME), 1);
 if (flag)
@@ -6253,15 +6302,24 @@ t_bool only_enabled = (sim_switches & SWMASK ('E'));
 if (cptr && (*cptr != 0))
     return SCPE_2MARG;
 fprintf (st, "%s simulator configuration%s\n\n", sim_name, only_enabled ? " (enabled devices)" : "");
+for (i = dev_name_len = 0; (dptr = sim_devices[i]) != NULL; i++)
+    if (!only_enabled || !qdisable (dptr))
+        if (dev_name_len < strlen (dptr->name))
+            dev_name_len = strlen (dptr->name);
 for (i = 0; (dptr = sim_devices[i]) != NULL; i++)
     if (!only_enabled || !qdisable (dptr))
         show_device (st, dptr, flag);
 if (sim_switches & SWMASK ('I')) {
+    for (i = dev_name_len = 0; sim_internal_device_count && (dptr = sim_internal_devices[i]); ++i)
+        if (!only_enabled || !qdisable (dptr))
+            if (dev_name_len < strlen (dptr->name))
+                dev_name_len = strlen (dptr->name);
     fprintf (st, "\nInternal Devices%s\n\n", only_enabled ? " (enabled devices)" : "");
     for (i = 0; sim_internal_device_count && (dptr = sim_internal_devices[i]); ++i)
         if (!only_enabled || !qdisable (dptr))
             show_device (st, dptr, flag);
     }
+dev_name_len = 0;
 return SCPE_OK;
 }
 
@@ -8510,12 +8568,8 @@ if (signal (SIGTERM, int_handler) == SIG_ERR) {         /* set WRU */
     sim_ttcmd ();
     return r;
     }
-if (sim_step) {                                         /* set step timer */
-    if (sim_switches & SWMASK ('T'))                    /* stepping for elapsed time? */
-        sim_activate_after (&sim_step_unit, (uint32)sim_step);/* wall clock based step */
-    else
-        sim_activate (&sim_step_unit, sim_step);        /* instruction based step */
-    }
+if (sim_step)                                           /* set step timer */
+    sim_sched_step ();
 sim_activate_after (&sim_flush_unit, FLUSH_INTERVAL);   /* Enable periodic buffer flushing */
 stop_cpu = FALSE;
 sim_is_running = TRUE;                                  /* flag running */
@@ -8565,7 +8619,7 @@ do {
     else
         sim_step = 1;
     if (sim_step)                                       /* set step timer */
-        sim_activate (&sim_step_unit, sim_step);
+        sim_sched_step ();
     } while (1);
 
 if ((SCPE_BARE_STATUS(r) == SCPE_STOP) &&
@@ -8593,7 +8647,7 @@ signal (SIGHUP, SIG_DFL);                               /* cancel WRU */
 signal (SIGTERM, SIG_DFL);                              /* cancel WRU */
 sim_flush_buffered_files();
 sim_cancel (&sim_flush_unit);                           /* cancel flush timer */
-sim_cancel (&sim_step_unit);                            /* cancel step timer */
+sim_cancel_step ();                                     /* cancel step timer */
 sim_throt_cancel ();                                    /* cancel throttle */
 AIO_UPDATE_QUEUE;
 UPDATE_SIM_TIME;                                        /* update sim time */
@@ -8730,6 +8784,16 @@ return SCPE_EXPECT | (sim_do_echo ? 0 : SCPE_NOMESSAGE);
 t_stat sim_cancel_step (void)
 {
 return sim_cancel (&sim_step_unit);
+}
+
+/* schedule step service */
+
+t_stat sim_sched_step (void)
+{
+if (sim_switches & SWMASK ('T'))                    /* stepping for elapsed time? */
+    return sim_activate_after_abs (&sim_step_unit, (uint32)sim_step);/* wall clock based step */
+else
+    return sim_activate_abs (&sim_step_unit, sim_step);    /* instruction based step */
 }
 
 /* Signal handler for ^C signal - set stop simulation flag */
@@ -11299,6 +11363,7 @@ do {
     uptr = sim_clock_queue;                             /* get first */
     sim_clock_queue = uptr->next;                       /* remove first */
     uptr->next = NULL;                                  /* hygiene */
+    sim_interval -= uptr->time;
     uptr->time = 0;
     if (sim_clock_queue != QUEUE_LIST_END)
         sim_interval += sim_clock_queue->time;
@@ -11505,9 +11570,9 @@ AIO_CANCEL(uptr);
 AIO_UPDATE_QUEUE;
 if (sim_clock_queue == QUEUE_LIST_END)
     return SCPE_OK;
-UPDATE_SIM_TIME;                                        /* update sim time */
 if (!sim_is_active (uptr))
     return SCPE_OK;
+UPDATE_SIM_TIME;                                        /* update sim time */
 sim_debug (SIM_DBG_EVENT, &sim_scp_dev, "Canceling Event for %s\n", sim_uname(uptr));
 nptr = QUEUE_LIST_END;
 
@@ -12044,14 +12109,16 @@ if (sim_brk_summ & BRK_TYP_DYN_ALL)
     btyp |= BRK_TYP_DYN_ALL;
 
 if ((bp = sim_brk_fnd_ex (loc, btyp, TRUE, spc))) {     /* in table, and type match? */
-    if (bp->time_fired[spc] == sim_time)                /* already taken?  */
+    double s_gtime = sim_gtime ();                      /* get time now */
+
+    if (bp->time_fired[spc] == s_gtime)                 /* already taken?  */
         return 0;
-    bp->time_fired[spc] = sim_time;                     /* remember match time */
+    bp->time_fired[spc] = s_gtime;                      /* remember match time */
     if (--bp->cnt > 0)                                  /* count > 0? */
         return 0;
     bp->cnt = 0;                                        /* reset count */
     sim_brk_setact (bp->act);                           /* set up actions */
-    sim_brk_match_type = btyp & bp->typ;                               /* set return value */
+    sim_brk_match_type = btyp & bp->typ;                /* set return value */
     if (bp->typ & BRK_TYP_TEMP)
         sim_brk_clr (loc, bp->typ);                     /* delete one-shot breakpoint */
     sim_brk_match_addr = loc;
@@ -15382,6 +15449,10 @@ for (i = 0; (dptr = sim_devices[i]) != NULL; i++) {
         if (rsz > sizeof (t_value)) {
             Bad = TRUE;
             Mprintf (f, "%u bits at offset %u is wider than the maximum allowed width of %u bits\n", rptr->width, rptr->offset, (uint32)(8 * sizeof(t_value)));
+            }
+        if (rptr->width == 0) {
+            Bad = TRUE;
+            Mprintf (f, "a 0 bit wide register is meaningless\n");
             }
         if ((rptr->obj_size != 0) && (rptr->ele_size != 0) && (rptr->depth != 0) && (rptr->macro != NULL)) {
             if (rptr->flags & REG_UNIT) {
