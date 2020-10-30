@@ -315,6 +315,7 @@
     else *(((uint32 *) mb) + ((uint32) j)) = v;
 #endif
 
+#define SIM_DBG_EVENT_NEG   0x01000000      /* negative event dispatch activities */
 #define SIM_DBG_EVENT       0x02000000      /* event dispatch activities */
 #define SIM_DBG_ACTIVATE    0x04000000      /* queue insertion activities */
 #define SIM_DBG_AIO_QUEUE   0x08000000      /* asynch event queue activities */
@@ -325,6 +326,7 @@
 
 static DEBTAB scp_debug[] = {
   {"EVENT",     SIM_DBG_EVENT,      "Event Dispatch Activities"},
+  {"NEGATIVE",  SIM_DBG_EVENT_NEG,  "Negative Event Dispatch Activities"},
   {"ACTIVATE",  SIM_DBG_ACTIVATE,   "Event Queue Insertion Activities"},
   {"QUEUE",     SIM_DBG_AIO_QUEUE,  "Asynch Event Queue Activities"},
   {"EXPSTACK",  SIM_DBG_EXP_STACK,  "Expression Stack Activities"},
@@ -336,14 +338,14 @@ static DEBTAB scp_debug[] = {
 
 static const char *sim_scp_description (DEVICE *dptr)
 {
-return "SCP Event and Internal Command Processing";
+return "SCP Event and Internal Command Processing and Testing";
 }
 
-static UNIT scp_unit;
+static UNIT scp_test_units[4];
 
 DEVICE sim_scp_dev = {
-    "SCP-PROCESS", &scp_unit, NULL, NULL, 
-    1, 0, 0, 0, 0, 0, 
+    "SCP-PROCESS", scp_test_units, NULL, NULL, 
+    4, 0, 0, 0, 0, 0, 
     NULL, NULL, NULL, NULL, NULL, NULL, 
     NULL, DEV_NOSAVE|DEV_DEBUG, 0, 
     scp_debug, NULL, NULL, NULL, NULL, NULL,
@@ -1125,12 +1127,12 @@ static const char simh_help1[] =
       "++RUNLIMIT n {%C|MICROSECONDS|SECONDS|MINUTES|HOURS}\n"
       "++NORUNLIMIT\n\n"
       "  Equivalently:\n\n"
-      "++SET RUNLIMIT n {CYCLES|MICROSECONDS|SECONDS|MINUTES|HOURS}\n"
+      "++SET RUNLIMIT n {%C|MICROSECONDS|SECONDS|MINUTES|HOURS}\n"
       "++SET NORUNLIMIT\n\n"
       " The run limit state can be examined with:\n\n"
       "++SHOW RUNLIMIT\n\n"
       " If the units of the run limit are not specified, the default units are\n"
-      " %C.  Once an execution run limit has beenn reached, any subsequent\n"
+      " %C.  Once an execution run limit has been reached, any subsequent\n"
       " GO, RUN, CONTINUE, STEP or BOOT commands will cause the simulator to\n"
       " exit.  A previously defined RUNLIMIT can be cleared with the NORUNLIMIT\n"
       " command or the establishment of a new run limit.\n"
@@ -2428,6 +2430,23 @@ static const char simh_help2[] =
       "4-d\n"
       " Many tests are capable of producing various amounts of debug output\n"
       " during their execution.  The -d switch enables that output\n"
+      "2File Tools\n"
+      " Tools to manipulate file containers and to tranfer files/data into or\n"
+      " out of a simulated environment are provided.\n\n"
+      " In general, these are tools natively found on the host operating system.\n"
+      " They are explicitly supported directly from SCP to allow for platform\n"
+      " neutral scripts that either test or build running environments for simh\n"
+      " users.\n\n"
+#define HLP_TAR         "*Commands File_Tools Tar_Tool"
+      "3Tar Tool\n"
+      " tar is an archiving utility\n\n"
+      " The quick and dirty help for the TAR command can be viewed with:\n\n"
+      "++sim> tar --help\n\n"
+#define HLP_CURL        "*Commands File_Tools Curl_Tool"
+      "3Curl Tool\n"
+      " curl is a utility to transfer a URL\n\n"
+      " The quick and dirty help for the TAR command can be viewed with:\n\n"
+      "++sim> curl --help\n\n"
 #define HLP_DISKINFO    "*Commands DISKINFO"
       "2Disk Container Information\n"
       " Information about a Disk Container can be displayed with the DISKINFO command:\n\n"
@@ -2503,6 +2522,8 @@ static CTAB cmd_table[] = {
 #if defined(USE_SIM_VIDEO)
     { "SCREENSHOT", &screenshot_cmd,0,          HLP_SCREENSHOT, NULL, NULL },
 #endif
+    { "TAR",        &tar_cmd,       0,          HLP_TAR,        NULL, NULL },
+    { "CURL",       &curl_cmd,      0,          HLP_CURL,       NULL, NULL },
     { "RUNLIMIT",   &runlimit_cmd,  1,          HLP_RUNLIMIT,   NULL, NULL },
     { "NORUNLIMIT", &runlimit_cmd,  0,          HLP_RUNLIMIT,   NULL, NULL },
     { "TESTLIB",    &test_lib_cmd,  0,          HLP_TESTLIB,    NULL, NULL },
@@ -4384,7 +4405,7 @@ int i;
 size_t outstr_off = 0;
 
 sim_exp_argv = do_arg;
-clock_gettime(CLOCK_REALTIME, &cmd_time);
+sim_rtcn_get_time (&cmd_time, 0);
 tmpbuf = (char *)malloc(instr_size);
 op = tmpbuf;
 oend = tmpbuf + instr_size - 2;
@@ -6063,6 +6084,47 @@ void fprint_capac (FILE *st, DEVICE *dptr, UNIT *uptr)
 fprintf (st, "%s", sprint_capac (dptr, uptr));
 }
 
+static const char *_get_tool_version (const char *tool)
+{
+char findcmd[PATH_MAX+1];
+char toolpath[PATH_MAX+1];
+char versioncmd[PATH_MAX+1];
+static char toolversion[PATH_MAX+1];
+FILE *f;
+
+#if defined(_WIN32)
+#define FIND_CMD "where"
+#define popen _popen
+#define pclose _pclose
+#else
+#define FIND_CMD "which"
+#endif
+toolversion[0] = '\0';
+snprintf (findcmd, sizeof (findcmd), "%s %s", FIND_CMD, tool);
+if ((f = popen (findcmd, "r"))) {
+    memset (toolpath, 0, sizeof(toolpath));
+    do {
+        if (NULL == fgets (toolpath, sizeof(toolpath)-1, f))
+            break;
+        sim_trim_endspc (toolpath);
+        } while (toolpath[0] == '\0');
+    pclose (f);
+    if (toolpath[0]) {
+        snprintf (versioncmd, sizeof (versioncmd), "%s --version", tool);
+        if ((f = popen (versioncmd, "r"))) {
+            memset (toolversion, 0, sizeof(toolversion));
+            do {
+                if (NULL == fgets (toolversion, sizeof(toolversion)-1, f))
+                    break;
+                sim_trim_endspc (toolversion);
+                } while (toolversion[0] == '\0');
+            pclose (f);
+            }
+        }
+    }
+return toolversion;
+}
+
 /* Show <global name> processors  */
 
 t_stat show_version (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, CONST char *cptr)
@@ -6222,6 +6284,8 @@ if (flag) {
         char *proc_rev = getenv ("PROCESSOR_REVISION");
         char *proc_arch3264 = getenv ("PROCESSOR_ARCHITEW6432");
         char osversion[PATH_MAX+1] = "";
+        char tarversion[PATH_MAX+1] = "";
+        char curlversion[PATH_MAX+1] = "";
         FILE *f;
 
         if ((f = _popen ("ver", "r"))) {
@@ -6237,10 +6301,18 @@ if (flag) {
         fprintf (st, "\n        Architecture: %s%s%s, Processors: %s", arch, proc_arch3264 ? " on " : "", proc_arch3264 ? proc_arch3264  : "", procs);
         fprintf (st, "\n        Processor Id: %s, Level: %s, Revision: %s", proc_id ? proc_id : "", proc_level ? proc_level : "", proc_rev ? proc_rev : "");
         strlcpy (os_type, "Windows", sizeof (os_type));
+        strlcpy (tarversion, _get_tool_version ("tar"), sizeof (tarversion));
+        if (tarversion[0])
+            fprintf (st, "\n        tar tool: %s", tarversion);
+        strlcpy (curlversion, _get_tool_version ("curl"), sizeof (curlversion));
+        if (curlversion[0])
+            fprintf (st, "\n        curl tool: %s", curlversion);
         }
 #else
     if (1) {
         char osversion[2*PATH_MAX+1] = "";
+        char tarversion[PATH_MAX+1] = "";
+        char curlversion[PATH_MAX+1] = "";
         FILE *f;
         
         if ((f = popen ("uname -a", "r"))) {
@@ -6262,6 +6334,12 @@ if (flag) {
                 } while (os_type[0] == '\0');
             pclose (f);
             }
+        strlcpy (tarversion, _get_tool_version ("tar"), sizeof (tarversion));
+        if (tarversion[0])
+            fprintf (st, "\n        tar tool: %s", tarversion);
+        strlcpy (curlversion, _get_tool_version ("curl"), sizeof (curlversion));
+        if (curlversion[0])
+            fprintf (st, "\n        curl tool: %s", curlversion);
         }
 #endif
     if ((!strcmp (os_type, "Unknown")) && (getenv ("OSTYPE")))
@@ -8378,6 +8456,7 @@ for (i = 1; (dptr = sim_devices[i]) != NULL; i++) {     /* flush attached files 
             }
         }
     }
+tmxr_flush_log_files ();
 }
 
 t_stat
@@ -8813,6 +8892,7 @@ void int_handler (int sig)
 stop_cpu = TRUE;
 if (sig == SIGTERM)
     sigterm_received = TRUE;
+sim_interval = 0;               /* Minimize when stop_cpu gets noticed */
 }
 
 /* Examine/deposit commands
@@ -11355,6 +11435,7 @@ t_stat sim_process_event (void)
 {
 UNIT *uptr;
 t_stat reason, bare_reason;
+int32 sim_interval_catchup;
 
 if (stop_cpu) {                                         /* stop CPU? */
     stop_cpu = 0;
@@ -11362,21 +11443,45 @@ if (stop_cpu) {                                         /* stop CPU? */
     }
 AIO_UPDATE_QUEUE;
 UPDATE_SIM_TIME;                                        /* update sim time */
-
+if (sim_interval > 0) {
+    sim_debug (SIM_DBG_EVENT, &sim_scp_dev, "Interval not yet expired: %d\n", sim_interval);
+    return SCPE_OK;
+    }
 if (sim_clock_queue == QUEUE_LIST_END) {                /* queue empty? */
     sim_interval = noqueue_time = NOQUEUE_WAIT;         /* flag queue empty */
     sim_debug (SIM_DBG_EVENT, &sim_scp_dev, "Queue Empty New Interval = %d\n", sim_interval);
     return SCPE_OK;
     }
 sim_processing_event = TRUE;
+/* If sim_interval is negative, we've missed the opportunity to  */
+/* dispatch one or more events when they were scheduled to fire. */
+/* To accomodate this, we backup time to when the first event    */
+/* was supposed to fire and advance it from there until things   */
+/* have caught up.                                               */
+if (sim_interval < 0) {
+    sim_interval_catchup = sim_interval;
+    sim_interval = 0;
+    UPDATE_SIM_TIME;                          /* update sim time */
+    sim_debug (SIM_DBG_EVENT_NEG, &sim_scp_dev, "Processing event for %s with sim_interval = %d, event time = %.0f\n", 
+        sim_uname (sim_clock_queue), sim_interval_catchup, sim_gtime ());
+    if (sim_clock_queue->next != QUEUE_LIST_END)
+        sim_debug (SIM_DBG_EVENT_NEG, &sim_scp_dev, "- Next event for %s after = %d\n", 
+            sim_uname (sim_clock_queue->next), sim_clock_queue->next->time);
+    sim_time -= sim_clock_queue->time;
+    sim_rtime -= sim_clock_queue->time;
+    }
+else
+    sim_interval_catchup = 0;
 do {
     uptr = sim_clock_queue;                             /* get first */
     sim_clock_queue = uptr->next;                       /* remove first */
     uptr->next = NULL;                                  /* hygiene */
-    sim_interval -= uptr->time;
     uptr->time = 0;
-    if (sim_clock_queue != QUEUE_LIST_END)
-        sim_interval += sim_clock_queue->time;
+    if (sim_clock_queue != QUEUE_LIST_END) {
+        if (sim_interval_catchup < 0)
+            sim_interval = -sim_interval_catchup;
+        sim_interval += sim_interval_catchup + sim_clock_queue->time;
+        }
     else
         sim_interval = noqueue_time = NOQUEUE_WAIT;
     AIO_EVENT_BEGIN(uptr);
@@ -11392,6 +11497,13 @@ do {
             reason = SCPE_OK;
         }
     AIO_EVENT_COMPLETE(uptr, reason);
+    if (sim_interval_catchup < -1) {
+        sim_interval_catchup += sim_clock_queue->time;
+        sim_time += sim_clock_queue->time;
+        sim_rtime += sim_clock_queue->time;
+        }
+    else
+        sim_interval_catchup = 0;
     bare_reason = SCPE_BARE_STATUS (reason);
     if ((bare_reason != SCPE_OK)      && /* Provide context for unexpected errors */
         (bare_reason >= SCPE_BASE)    &&
@@ -11404,7 +11516,7 @@ do {
         (bare_reason != SCPE_EXIT))
         sim_messagef (reason, "\nUnexpected internal error while processing event for %s which returned %d - %s\n", sim_uname (uptr), reason, sim_error_text (reason));
     } while ((reason == SCPE_OK) && 
-             (sim_interval <= 0) && 
+             ((sim_interval + sim_interval_catchup) <= 0) && 
              (sim_clock_queue != QUEUE_LIST_END) &&
              (!stop_cpu));
 
@@ -13175,7 +13287,7 @@ char pc_s[64] = "";
 struct timespec time_now;
 
 if (sim_deb_switches & (SWMASK ('T') | SWMASK ('R') | SWMASK ('A'))) {
-    clock_gettime(CLOCK_REALTIME, &time_now);
+    sim_rtcn_get_time(&time_now, 0);
     if (sim_deb_switches & SWMASK ('R'))
         sim_timespec_diff (&time_now, &time_now, &sim_deb_basetime);
     if (sim_deb_switches & SWMASK ('T')) {
@@ -13712,6 +13824,35 @@ else {
     }
 return ret;
 }
+
+/* Command interfaces to external tools
+ * tar
+ * curl
+ */
+
+
+static t_stat _process_cmd (const char *cmd, CONST char *cptr)
+{
+char gbuf[CBUFSIZE*2];
+
+if (_get_tool_version (cmd)[0]) {
+    snprintf (gbuf, sizeof (gbuf), "%s %s", cmd, cptr);
+    return spawn_cmd (0, gbuf);
+    }
+else
+    return SCPE_NOFNC;
+}
+
+t_stat tar_cmd (int32 flag, CONST char *cptr)
+{
+return _process_cmd ("tar", cptr);
+}
+
+t_stat curl_cmd (int32 flag, CONST char *cptr)
+{
+return _process_cmd ("curl", cptr);
+}
+
 
 /* Hierarchical help presentation
  *
@@ -15510,6 +15651,107 @@ MClose (f);
 return stat;
 }
 
+static t_stat sim_scp_svc (UNIT *uptr)
+{
+sim_printf ("Unit %s fired at %.0f\n", sim_uname (uptr), sim_gtime ());
+return SCPE_OK;
+}
+
+static t_stat test_scp_event_sequencing ()
+{
+DEVICE *dptr = &sim_scp_dev;
+uint32 i;
+int active;
+t_stat r = SCPE_OK;
+int32 start_deb_switches = sim_set_deb_switches (0);
+
+sim_set_deb_switches (SWMASK ('F'));
+sim_scp_dev.dctrl = 0xFFFFFFFF;
+
+/* reset queue */
+while (sim_clock_queue != QUEUE_LIST_END)
+    sim_cancel (sim_clock_queue);
+sim_time = sim_rtime = 0;
+noqueue_time = sim_interval = 0;
+
+/* queue test unit events */
+for (i = 0; i < dptr->numunits; i++) {
+    dptr->units[i].action = sim_scp_svc;    /* connect the action routine to the unit */
+    r = sim_activate (&dptr->units[i], i);
+    if (SCPE_OK != r)
+        return sim_messagef (SCPE_IERR, "sim_activate() unexpected result: %s\n", sim_error_text (r));
+    }
+/* check test unit events */
+for (i = 0; i < dptr->numunits; i++) {
+    int32 t = sim_activate_time (&dptr->units[i]);
+
+    if (t != i + 1)
+        return sim_messagef (SCPE_IERR, "sim_activate_time() unexpected result for unit %d: %d\n", i, t);
+    }
+sim_printf ("sim_interval = %d, sim_gtime = %.0f\n", sim_interval, sim_gtime ());
+/* check test unit events with negative sim_interval */
+sim_interval = -((int32)dptr->numunits);
+sim_printf ("sim_interval = %d, sim_gtime = %.0f\n", sim_interval, sim_gtime ());
+for (i = 0; i < dptr->numunits; i++) {
+    int32 t = sim_activate_time (&dptr->units[i]);
+
+    if (t != i + 1)
+        return sim_messagef (SCPE_IERR, "sim_activate_time() unexpected result for unit %d: %d\n", i, t);
+    }
+r = sim_process_event ();
+if (r != SCPE_OK)
+    return sim_messagef (SCPE_IERR, "sim_process_event() unexpected result: %s\n", sim_error_text (r));
+sim_printf ("after sim_process_event() sim_interval = %d, sim_gtime = %.0f\n", sim_interval, sim_gtime ());
+/* check to make sure that all units have fired */
+for (i = 0; i < dptr->numunits; i++) {
+    int32 t = sim_activate_time (&dptr->units[i]);
+
+    if (t != 0)
+        return sim_messagef (SCPE_IERR, "sim_activate_time() unexpected result for unit %d: %d\n", i, t);
+    }
+/* queue test unit events again with an offset of 1 */
+for (i = 0; i < dptr->numunits; i++) {
+    r = sim_activate (&dptr->units[i], i + 1);
+    if (SCPE_OK != r)
+        return sim_messagef (SCPE_IERR, "sim_activate() unexpected result: %s\n", sim_error_text (r));
+    }
+/* try to process events without advancing sim_interval */
+r = sim_process_event ();
+if (r != SCPE_OK)
+    return sim_messagef (SCPE_IERR, "sim_process_event() unexpected result: %s\n", sim_error_text (r));
+for (i = 0, active = 0; i < dptr->numunits; i++) {
+    if (sim_is_active (&dptr->units[i]))
+        ++active;
+    }
+if (active != dptr->numunits)
+    return sim_messagef (SCPE_IERR, "unexpected count %d of active/queued units - expected %d\n", active, (int)dptr->numunits);
+/* advance sim_interval by an amount that should leave one event queued next time */
+sim_interval = -((int32)dptr->numunits - 1);
+r = sim_process_event ();
+if (r != SCPE_OK)
+    return sim_messagef (SCPE_IERR, "sim_process_event() unexpected result: %s\n", sim_error_text (r));
+for (i = 0, active = 0; i < dptr->numunits; i++) {
+    if (sim_is_active (&dptr->units[i]))
+        ++active;
+    }
+if (active != 1)
+    return sim_messagef (SCPE_IERR, "unexpected count %d of active/queued units - expected %d\n", active, 1);
+r = sim_activate_after (dptr->units, 10);
+if (r != SCPE_OK)
+    return sim_messagef (SCPE_IERR, "sim_activate_after() unexpected result: %s\n", sim_error_text (r));
+sim_interval = -1;  /* This should cover the remaining event on the last unit from above and leave the timer based one */
+r = sim_process_event ();
+if (r != SCPE_OK)
+    return sim_messagef (SCPE_IERR, "sim_process_event() unexpected result: %s\n", sim_error_text (r));
+for (i = 0, active = 0; i < dptr->numunits; i++) {
+    if (sim_is_active (&dptr->units[i]))
+        ++active;
+    }
+if (active != 1)
+    return sim_messagef (SCPE_IERR, "unexpected count %d of active/queued units - expected %d\n", active, 1);
+sim_set_deb_switches (start_deb_switches);
+return r;
+}
 
 /*
  * Compiled in unit tests for the various device oriented library 
@@ -15546,6 +15788,8 @@ if (sim_switches & SWMASK ('D')) {
     sim_set_debon (0, "STDOUT");
     sim_switches = saved_switches;
     }
+if (test_scp_event_sequencing () != SCPE_OK)
+    return sim_messagef (SCPE_IERR, "SCP event sequencing test failed\n");
 for (i = 0; (dptr = sim_devices[i]) != NULL; i++) {
     t_stat tstat = SCPE_OK;
     t_bool was_disabled = ((dptr->flags & DEV_DIS) != 0);

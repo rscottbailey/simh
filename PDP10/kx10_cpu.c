@@ -4259,7 +4259,7 @@ in_loop:
          }
          /* Handle events during a indirect loop */
          AIO_CHECK_EVENT;                                   /* queue async events */
-         if (sim_interval-- <= 0) {
+         if (--sim_interval <= 0) {
               if ((reason = sim_process_event()) != SCPE_OK) {
                   return reason;
               }
@@ -7800,14 +7800,15 @@ jrstf:
                      sect = prev_sect;
                   if (sect != 0 && (AR & SMASK) == 0 && (AR & SECTM) != 0) {
                      AR = (AR - 1) & FMASK;
+                     set_reg(AC, AR & FMASK);
                      break;
                   }
               }
 #endif
 #if PDP6 | KL
               /* This has to before the check for KL10 B extended check */
-              i_flags |= SAC;
               AR = SOB(AR);
+              set_reg(AC, AR & FMASK);
 #endif
               if ((AR & C1) == 0) {
 #if KI | KL
@@ -9048,14 +9049,6 @@ do_byte_setup(int n, int wr, int *pos, int *sz)
                 AB = MB & RMASK;
              }
          }
-#if 0
-         /* Handle events during a indirect loop */
-         if (sim_interval-- <= 0) {
-              if (sim_process_event() != SCPE_OK) {
-                  return -1;
-              }
-         }
-#endif
     };
     /* Update pointer */
     val1 &= PMASK;
