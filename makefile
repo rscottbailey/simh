@@ -354,10 +354,6 @@ ifeq (${WIN32},)  #*nix Environments (&& cygwin)
         INCPATH += $(foreach dir,$(wildcard /usr/local/Cellar/*/*),$(dir)/include)
         LIBPATH += $(foreach dir,$(wildcard /usr/local/Cellar/*/*),$(dir)/lib)
       endif
-      ifeq (libXt,$(shell if ${TEST} -d /usr/X11/lib; then echo libXt; fi))
-        LIBPATH += /usr/X11/lib
-        OS_LDFLAGS += -L/usr/X11/lib
-      endif
     else
       ifeq (Linux,$(OSTYPE))
         ifeq (Android,$(shell uname -o))
@@ -457,12 +453,6 @@ ifeq (${WIN32},)  #*nix Environments (&& cygwin)
               OS_LDFLAGS += -L/usr/pkg/lib -R/usr/pkg/lib
               OS_CCDEFS += -I/usr/pkg/include
             endif
-            ifeq (X11R7,$(shell if ${TEST} -d /usr/X11R7/lib; then echo X11R7; fi))
-              LIBPATH += /usr/X11R7/lib
-              INCPATH += /usr/X11R7/include
-              OS_LDFLAGS += -L/usr/X11R7/lib -R/usr/X11R7/lib
-              OS_CCDEFS += -I/usr/X11R7/include
-            endif
             ifeq (/usr/local/lib,$(findstring /usr/local/lib,${LIBPATH}))
               INCPATH += /usr/local/include
               OS_CCDEFS += -I/usr/local/include
@@ -485,6 +475,16 @@ ifeq (${WIN32},)  #*nix Environments (&& cygwin)
             endif
           endif
         endif
+      endif
+    endif
+    ifeq (,$(filter /lib/,$(LIBPATH)))
+      ifeq (existlib,$(shell if $(TEST) -d /lib/; then echo existlib; fi))
+        LIBPATH += /lib/
+      endif
+    endif
+    ifeq (,$(filter /usr/lib/,$(LIBPATH)))
+      ifeq (existusrlib,$(shell if $(TEST) -d /usr/lib/; then echo existusrlib; fi))
+        LIBPATH += /usr/lib/
       endif
     endif
     # Some gcc versions don't support LTO, so only use LTO when the compiler is known to support it
@@ -645,8 +645,6 @@ ifeq (${WIN32},)  #*nix Environments (&& cygwin)
           DISPLAY340 = ${DISPLAYD}/type340.c
           DISPLAYNG = ${DISPLAYD}/ng.c
           DISPLAYIII = ${DISPLAYD}/iii.c
-          DISPLAYIMLAC = ${DISPLAYD}/imlac.c
-          DISPLAYTT2500 = ${DISPLAYD}/tt2500.c
           DISPLAY_OPT += -DUSE_DISPLAY $(VIDEO_CCDEFS) $(VIDEO_LDFLAGS)
           $(info using libSDL2: $(call find_include,SDL2/SDL))
           ifeq (Darwin,$(OSTYPE))
@@ -1562,7 +1560,7 @@ IMLACD = ${SIMHD}/imlac
 IMLAC = ${IMLACD}/imlac_sys.c ${IMLACD}/imlac_cpu.c \
 	${IMLACD}/imlac_dp.c ${IMLACD}/imlac_crt.c ${IMLACD}/imlac_kbd.c \
 	${IMLACD}/imlac_tty.c ${IMLACD}/imlac_pt.c ${IMLACD}/imlac_bel.c \
-	${DISPLAYL} ${DISPLAYIMLAC}
+	${DISPLAYL}
 IMLAC_OPT = -I ${IMLACD} ${DISPLAY_OPT}
 
 
@@ -1570,7 +1568,7 @@ TT2500D = ${SIMHD}/tt2500
 TT2500 = ${TT2500D}/tt2500_sys.c ${TT2500D}/tt2500_cpu.c \
 	${TT2500D}/tt2500_dpy.c ${TT2500D}/tt2500_crt.c ${TT2500D}/tt2500_tv.c \
 	${TT2500D}/tt2500_key.c ${TT2500D}/tt2500_uart.c ${TT2500D}/tt2500_rom.c \
-	${DISPLAYL} ${DISPLAYTT2500}
+	${DISPLAYL}
 TT2500_OPT = -I ${TT2500D} ${DISPLAY_OPT}
 
 
